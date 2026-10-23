@@ -70,3 +70,15 @@ def test_mpc_swing_meets_impact_and_limits(cfg):
     assert np.allclose(plan.qd[-1], 0, atol=tol)
     q, qd, _ = plan(plan.t_hit)                                   # the trajectory passes the impact node
     assert np.allclose(q, plan.q[plan.n_pre], atol=1e-9)
+
+
+def test_two_robot_rally_short():
+    """E2: two mirrored arms, cooperative lobs; a short rally completes without a fault."""
+    from tt.config import REPO
+    from tt.rally2 import run_rally
+
+    cfg2 = load_config(REPO / "config" / "rally2.yaml")
+    r = run_rally(cfg2, seed=1, max_hits=4)
+    assert r.fault == "max hits" and len(r.hits) == 4
+    assert [who for who, _ in r.hits] == ["A", "B", "A", "B"]
+    assert not (r.logs["sat_A"].any() or r.logs["sat_B"].any())

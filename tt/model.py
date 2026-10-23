@@ -83,10 +83,10 @@ def _arm_spec(cfg: dict) -> mujoco.MjSpec:
     return spec
 
 
-def _add_motors(spec: mujoco.MjSpec, cfg: dict) -> None:
+def _add_motors(spec: mujoco.MjSpec, cfg: dict, prefix: str = "") -> None:
     rc = cfg["robot"]
     for i in range(1, rc["n_joints"] + 1):
-        jname = f"{rc['arm_prefix']}joint{i}"
+        jname = f"{prefix}{rc['arm_prefix']}joint{i}"
         lo, hi = spec.joint(jname).actfrcrange      # stock per-joint torque limit
         act = spec.add_actuator(name=f"{jname}_motor", target=jname, trntype=mujoco.mjtTrn.mjTRN_JOINT)
         act.set_to_motor()
@@ -94,22 +94,22 @@ def _add_motors(spec: mujoco.MjSpec, cfg: dict) -> None:
         act.ctrlrange = [lo, hi]
 
 
-def _add_paddle(spec: mujoco.MjSpec, cfg: dict) -> None:
+def _add_paddle(spec: mujoco.MjSpec, cfg: dict, prefix: str = "") -> None:
     """Paddle frame: origin at the flange, +x along the handle, +z = blade normal."""
     pc = cfg["paddle"]
-    ee = spec.body(cfg["robot"]["ee_body"])
+    ee = spec.body(prefix + cfg["robot"]["ee_body"])
     L, R, t = pc["handle_length"], pc["blade_radius"], pc["blade_thickness"]
-    paddle = ee.add_body(name=PADDLE_BODY, pos=pc["flange_pos"], quat=pc["flange_quat"])
+    paddle = ee.add_body(name=prefix + PADDLE_BODY, pos=pc["flange_pos"], quat=pc["flange_quat"])
     paddle.add_geom(
-        name="paddle_handle", type=mujoco.mjtGeom.mjGEOM_BOX,
+        name=prefix + "paddle_handle", type=mujoco.mjtGeom.mjGEOM_BOX,
         size=[L / 2, pc["handle_half_width"], pc["handle_half_thickness"]], pos=[L / 2, 0, 0],
         mass=pc["handle_mass"], material="handle_wood", **NO_CONTACT,
     )
     paddle.add_geom(
-        name="paddle_blade", type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+        name=prefix + "paddle_blade", type=mujoco.mjtGeom.mjGEOM_CYLINDER,
         size=[R, t / 2, 0], pos=[L + R, 0, 0], mass=pc["blade_mass"], material="blade_red", **NO_CONTACT,
     )
-    paddle.add_site(name=PADDLE_SITE, pos=[L + R, 0, 0], size=[0.005, 0, 0], rgba=[0, 1, 0, 1])
+    paddle.add_site(name=prefix + PADDLE_SITE, pos=[L + R, 0, 0], size=[0.005, 0, 0], rgba=[0, 1, 0, 1])
 
 
 def _add_prescribed_paddle(spec: mujoco.MjSpec, cfg: dict) -> None:
@@ -176,9 +176,20 @@ def build_spec(cfg: dict, prescribed_paddle: bool = False) -> mujoco.MjSpec:
                              pos=[base[0], base[1], base[2] / 2], material="stand", **NO_CONTACT)
     frame = scene.worldbody.add_frame(pos=base)
     scene.attach(_arm_spec(cfg), prefix="", frame=frame)
-
     _add_motors(scene, cfg)
     _add_paddle(scene, cfg)
+
+    oc = cfg.get("opponent", {})
+    if oc.get("enabled", False):
+        # second arm at the far end: the first arm rotated 180 deg about the vertical axis through the net centre
+        x_mid = cfg["table"]["near_edge_x"] + cfg["table"]["length"] / 2
+        base_o = mirror_point(base, x_mid)
+        scene.worldbody.add_geom(name=oc["prefix"] + "stand", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hw, hw, base[2] / 2],
+                                 pos=[base_o[0], base_o[1], base[2] / 2], material="stand", **NO_CONTACT)
+        frame_o = scene.worldbody.add_frame(pos=base_o, quat=[0.0, 0.0, 0.0, 1.0])
+        scene.attach(_arm_spec(cfg), prefix=oc["prefix"], frame=frame_o)
+        _add_motors(scene, cfg, oc["prefix"])
+        _add_paddle(scene, cfg, oc["prefix"])
     _add_ball(scene, cfg)
     _add_table(scene, cfg)
     if prescribed_paddle:
@@ -186,9 +197,21 @@ def build_spec(cfg: dict, prescribed_paddle: bool = False) -> mujoco.MjSpec:
     return scene
 
 
-def scene_ids(m: mujoco.MjModel, cfg: dict) -> SceneIds:
+def mirror_point(p, x_mid: float) -> np.ndarray:
+    """Rotation by 180 deg about the vertical axis through (x_mid, 0): the far robot's frame from the near one's."""
+    p = np.asarray(p, float)
+    return np.array([2 * x_mid - p[0], -p[1], p[2]])
+
+
+def mirror_vector(v) -> np.ndarray:
+    v = np.asarray(v, float)
+    return np.array([-v[0], -v[1], v[2]])
+
+
+def scene_ids(m: mujoco.MjModel, cfg: dict, prefix: str = "") -> SceneIds:
+    """Ids for the arm whose element names start with prefix ("" = near arm, opponent.prefix = far arm)."""
     rc = cfg["robot"]
-    names = tuple(f"{rc['arm_prefix']}joint{i}" for i in range(1, rc["n_joints"] + 1))
+    names = tuple(f"{prefix}{rc['arm_prefix']}joint{i}" for i in range(1, rc["n_joints"] + 1))
     jid = [m.joint(n).id for n in names]
     act = np.array([m.actuator(f"{n}_motor").id for n in names])
     ball_j = m.joint(BALL_JOINT).id
@@ -203,9 +226,9 @@ def scene_ids(m: mujoco.MjModel, cfg: dict) -> SceneIds:
         q_lo=m.jnt_range[jid, 0].copy(),
         q_hi=m.jnt_range[jid, 1].copy(),
         tau_max=m.actuator_ctrlrange[act, 1].copy(),
-        ee_body=m.body(rc["ee_body"]).id,
-        paddle_body=m.body(PADDLE_BODY).id,
-        paddle_site=m.site(PADDLE_SITE).id,
+        ee_body=m.body(prefix + rc["ee_body"]).id,
+        paddle_body=m.body(prefix + PADDLE_BODY).id,
+        paddle_site=m.site(prefix + PADDLE_SITE).id,
         ball_body=m.body(BALL_BODY).id,
         ball_qpos=int(m.jnt_qposadr[ball_j]),
         ball_dof=int(m.jnt_dofadr[ball_j]),

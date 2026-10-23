@@ -19,3 +19,6 @@ MUJOCO_LOG.TXT
 !results/e1_landing.png
 !results/e1_return.mp4
 !results/e1_workspace.png
+!results/e2_summary.md
+!results/e2_rally.png
+!results/e2_rally.mp4

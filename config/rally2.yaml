@@ -1,0 +1,35 @@
+# Extra credit E2: two-robot cooperative rally. Deep-merged on top of rally.yaml.
+extends: rally.yaml
+
+opponent:
+  enabled: true                   # [plan E2] second OpenArm across the net
+  prefix: "opp_"                  # name prefix of the far arm's elements (joints, motors, paddle)
+  # placement: the near arm rotated 180 deg about the vertical axis through the net centre (tt/model.py mirror_point)
+
+coop:
+  # M6 (E2) cooperative shot (tt/shot.py CoopShot)
+  bounce_dists: [0.36, 0.39, 0.42, 0.45, 0.48]  # m [E2 analysis] bounce this far past the net on the partner's half (lob family: ~0.42 m -> ~33 deg tilt)
+  good_tilt_deg: 4.0              # deg [assumed] accept the first bounce distance whose paddle normal is this close to the nominal one
+  flight_time_range: [1.0, 2.2]   # s [E2 analysis] time to the partner's plane: selects the lob family (flat family ~0.5-0.8 s needs 70-90 deg tilt)
+  grid_vx: [2.0, 8.0, 0.5]        # m/s [assumed] |v_x| grid for initial guesses (toward the partner)
+  grid_vz: [-1.0, 7.0, 0.5]       # m/s [assumed]
+  grid_accept: 0.4                # m [assumed]
+  tol: 1.0e-3                     # m [assumed] aim accuracy
+  diff_step: 1.0e-4               # [assumed]
+  max_flight: 3.0                 # s
+
+e2:
+  max_hits: 30                    # [assumed] rally length cap (hits after the serve)
+  rallies: 20                     # [assumed] number of seeded rallies for the statistics
+  workers: 20                     # [assumed]
+  time_per_hit: 2.0               # s [assumed] episode time budget per hit (flights are ~1.6 s)
+  tail_time: 0.8                  # s [assumed] keep simulating this long after the rally ends (video)
+
+render:
+  # oblique view of the whole table and both robots, HD
+  width: 1280                     # px
+  height: 720                     # px
+  lookat: [2.02, 0.0, 1.15]       # m (above the net centre)
+  distance: 4.3                   # m
+  azimuth: 125.0                  # deg
+  elevation: -20.0                # deg
