@@ -130,7 +130,7 @@ def _add_ball(spec: mujoco.MjSpec, cfg: dict) -> None:
     ball.add_freejoint(name=BALL_JOINT)
     ball.add_geom(
         name=BALL_GEOM, type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[bc["radius"], 0, 0],
-        mass=bc["mass"], material="ball_orange", contype=2, conaffinity=2,
+        mass=bc["mass"], material=bc.get("material", "ball_orange"), contype=2, conaffinity=2,
     )
     if bc["hollow_shell"]:
         inertia = 2.0 / 3.0 * bc["mass"] * bc["radius"] ** 2

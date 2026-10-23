@@ -115,7 +115,12 @@ class SwingMPC:
         opti.subject_to(fk.pos(q_i) == self.P_c)
         opti.subject_to(self.P_t @ n_i == 0)
         opti.subject_to(ca.dot(self.P_n, n_i) >= np.cos(np.deg2rad(mc["normal_tol_deg"])))
-        opti.subject_to(ca.dot(self.P_n, fk.vel(q_i, qd_i)) == self.P_s)
+        self.full_velocity = mc.get("full_velocity", False)
+        if self.full_velocity:                 # spin shots: the brushing (tangential) paddle velocity matters too
+            self.P_v = opti.parameter(3)
+            opti.subject_to(fk.vel(q_i, qd_i) == self.P_v)
+        else:
+            opti.subject_to(ca.dot(self.P_n, fk.vel(q_i, qd_i)) == self.P_s)
         opti.subject_to(QD[:, N] == 0)
         for k in range(N + 1):
             opti.subject_to(opti.bounded(self.q_lo, Q[:, k], self.q_hi))
@@ -129,7 +134,8 @@ class SwingMPC:
                               "ipopt.warm_start_init_point": "yes"})
         self.opti, self.Q, self.QD, self.A = opti, Q, QD, A
 
-    def solve(self, t_now: float, q0, qd0, t_hit: float, c_star, n_star, speed) -> SwingPlan:
+    def solve(self, t_now: float, q0, qd0, t_hit: float, c_star, n_star, speed, v_paddle=None) -> SwingPlan:
+        """speed: paddle normal speed; v_paddle: full paddle-centre velocity (used when mpc.full_velocity)."""
         N1, N = self.N1, self.N1 + self.N2
         h1 = (t_hit - t_now) / N1
         n_star = np.asarray(n_star, float) / np.linalg.norm(n_star)
@@ -140,6 +146,8 @@ class SwingMPC:
         o.set_value(self.P_n, n_star)
         o.set_value(self.P_t, tangent_basis(n_star))
         o.set_value(self.P_s, speed)
+        if self.full_velocity:
+            o.set_value(self.P_v, np.asarray(speed * n_star if v_paddle is None else v_paddle, float))
         if self.last is not None and self.last.success:             # warm start: previous plan resampled
             ts = t_now + np.concatenate([[0], np.cumsum([h1] * N1 + [self.T_ft / self.N2] * self.N2)])
             prev = [self.last(t) for t in ts]

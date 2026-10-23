@@ -25,6 +25,9 @@ tt/model.py from config/default.yaml, so no physical value lives here.
     <material name="blade_red" rgba="0.8 0.1 0.1 1"/>
     <material name="handle_wood" rgba="0.6 0.45 0.25 1"/>
     <material name="ball_orange" rgba="1.0 0.55 0.1 1"/>
+    <!-- marked ball (spin configs): two-colour checker so the rotation is visible in videos -->
+    <texture name="ball_tex" type="cube" builtin="checker" rgb1="1.0 0.55 0.1" rgb2="0.15 0.15 0.15" width="32" height="32"/>
+    <material name="ball_marked" texture="ball_tex"/>
   </asset>
 
   <worldbody>

@@ -25,3 +25,27 @@ ji2024:
   target: "bounce heights 10, 30, 50 cm above the paddle; target point = paddle centre (Sec. 6)"
   position_error: "maximum landing errors 250, 2500, 6000 mm^2 at 10, 30, 50 cm (Sec. 6, Fig. 7; units as reported); dispersion grows with height"
   height_error: "each juggle within 10% of the set height (Sec. 6, Figs. 9-10)"
+
+# --- references the task sheet cites for the heuristic law [9]-[11] and the MPC extra credit [4] ---
+nguyen2025:
+  cite: "D. Nguyen, K. D. Cancio, S. Kim, 'High Speed Robotic Table Tennis Swinging Using Lightweight Hardware with Model Predictive Control', arXiv:2505.01617 (ICRA 2025)"
+  robot: "custom lightweight 5-DOF arm (6th DOF optional), OptiTrack 120 Hz ball tracking (Sec. II-III)"
+  method: "ball prediction with drag + table-rebound coefficients; joint-space OCP min sum(w_a qdd^2 + w_v qd^2) s.t. joint limits and terminal paddle position/velocity/orientation (eq. 3); CasADi + IPOPT; fixed-horizon MPC re-solved during the swing (Sec. IV)"
+  solve_time: "warm-started FHMPC median ~2.8-3.2 ms, 99.5% convergence (Table I, Intel i9-14900K)"
+  results: "hit rate 88.4% loop (topspin), 89.2% chop (backspin), 87.5% drive over 150 balls each; average exit velocity 11 m/s; paddle position error well within the 7.5 cm critical distance; speed within 2 m/s; orientation phi within 10 deg, theta up to 20 deg (Sec. V)"
+  limitation_noted: "lacks wrist authority for some paddle angles; strike plane fixed (Sec. VI)"
+
+buchler2022:
+  cite: "D. Büchler, S. Guist, R. Calandra, V. Berenz, B. Schölkopf, J. Peters, 'Learning to Play Table Tennis From Scratch Using Muscular Robots', IEEE T-RO 38(6), 2022 (arXiv:2006.05935)"
+  method: "model-free RL (step-based, stochastic policy) on a PAM-driven (pneumatic muscle) 4-DOF arm; hybrid sim-and-real training (HYSR) with simulated balls; reward = distance of landing point to the desired landing point"
+  results: "on 107 real balls the agent hits 96% and returns 77%; also learns smashes (Sec. IV)"
+
+ji2021:
+  cite: "Y. Ji et al., 'Model-Based Trajectory Prediction and Hitting Velocity Control for a New Table Tennis Robot', IROS 2021, doi:10.1109/IROS51168.2021.9636000"
+  method: "model-based ball trajectory prediction with clustering to reject invalid hitting points; quintic polynomial trajectory planning; position-based and velocity-based (hitting velocity control) return strategies"
+  results: "prediction accuracy > 92%; return success > 95% for 3-7 m/s balls; velocity-based strategy better at 7-9 m/s (from the abstract; full text not accessed)"
+
+gao2020:
+  cite: "W. Gao et al., 'Robotic Table Tennis with Model-Free Reinforcement Learning', IROS 2020 (arXiv:2003.14398)"
+  method: "simulated 8-DOF robot = 6-DOF arm + 2 linear axes; model-free policies (ES / PPO, CNN or MLP) from joint and ball position histories to joint velocities at 100 Hz; no ball model, no demonstrations; no spin"
+  results: "best policy returns 80% of randomly thrown balls (99% hit rate) with bimodal forehand/backhand play; hierarchical variant 94% (Tables VII, Sec. V)"

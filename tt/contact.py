@@ -62,6 +62,9 @@ class Surface:
     restitution: float
     friction: float
     state: Callable[[mujoco.MjModel, mujoco.MjData], SurfaceState]
+    model: str = "coulomb"           # "coulomb" (impact) or "grip" (impact_grip, racket rubber)
+    tangential_restitution: float = 0.0
+    spin_damping: float = 1.0
 
     def inside(self, lx: float, ly: float) -> bool:
         if self.shape == "disk":
@@ -102,6 +105,29 @@ def impact(v, w, n_s, v_c, e, mu, mass, radius, inertia):
     v_new = v + (j_n * n_s + j_t) / mass
     w_new = w + np.cross(r_c, j_t) / inertia
     return v_new, w_new, bool(rolling)
+
+
+def impact_grip(v, w, n_s, v_c, e_n, e_t, e_s, mass, radius, inertia):
+    """Racket-rubber contact (Nakashima base model as fitted in arXiv:2606.28805, Sec. III-D):
+    the contact point's tangential velocity reverses with tangential restitution e_t (rubber grips and
+    springs back), the normal velocity with e_n, and spin about the normal is damped by e_s.
+
+        u = v + w x (-r n) - v_c,  u_n = u.n,  u_t = u - u_n n,   kappa = m r^2 / I,  alpha = (1 + e_t) / (1 + kappa)
+        J_n = -m (1 + e_n) u_n,  J_t = -m alpha u_t      (=> u_t+ = -e_t u_t)
+        v+ = v + (J_n n + J_t) / m,   w+ = w + (-r n) x J_t / I,  then (w+ . n) <- e_s (w . n)
+    """
+    r_c = -radius * n_s
+    u = v + np.cross(w, r_c) - v_c
+    u_n = u @ n_s
+    u_t = u - u_n * n_s
+    kappa = mass * radius ** 2 / inertia
+    alpha = (1.0 + e_t) / (1.0 + kappa)
+    j_n = -mass * (1.0 + e_n) * u_n
+    j_t = -mass * alpha * u_t
+    v_new = v + (j_n * n_s + j_t) / mass
+    w_new = w + np.cross(r_c, j_t) / inertia
+    w_new = w_new + (e_s * (w @ n_s) - w_new @ n_s) * n_s
+    return v_new, w_new
 
 
 def table_restitution_from_rule(h_drop: float, h_rebound: float, k_d: float) -> float:
@@ -156,8 +182,13 @@ class ContactModel:
             a = total_accel(v, w, self.aero.p)
             p_hit, v_hit = p - v * tau + 0.5 * a * tau ** 2, v - a * tau
             v_c_hit = v_c          # surface velocity taken as constant over tau (<= 1 step)
-            v_out, w_out, rolling = impact(v_hit, w, n_s, v_c_hit, s.restitution, s.friction,
-                                           self.mass, self.radius, self.inertia)
+            if s.model == "grip":
+                v_out, w_out = impact_grip(v_hit, w, n_s, v_c_hit, s.restitution, s.tangential_restitution,
+                                           s.spin_damping, self.mass, self.radius, self.inertia)
+                rolling = False
+            else:
+                v_out, w_out, rolling = impact(v_hit, w, n_s, v_c_hit, s.restitution, s.friction,
+                                               self.mass, self.radius, self.inertia)
             a_out = total_accel(v_out, w_out, self.aero.p)
             p_new = p_hit + v_out * tau + 0.5 * a_out * tau ** 2
             v_new = v_out + a_out * tau
@@ -205,7 +236,8 @@ def paddle_surface(cfg: dict, state, restitution: float | None = None, name: str
     pc, cc = cfg["paddle"], cfg["contact"]
     e = cc["paddle_restitution"] if restitution is None else restitution
     return Surface(name, pc["blade_thickness"] / 2, "disk", (pc["blade_radius"],), True,
-                   e, cc["paddle_friction"], state)
+                   e, cc["paddle_friction"], state, cc.get("paddle_model", "coulomb"),
+                   cc.get("paddle_tangential_restitution", 0.0), cc.get("paddle_spin_damping", 1.0))
 
 
 def table_surface(cfg: dict, aero_params: AeroParams) -> Surface:

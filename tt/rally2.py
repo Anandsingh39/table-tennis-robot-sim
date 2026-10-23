@@ -46,6 +46,9 @@ class Shot:
     v_out: np.ndarray
     bounce_dist: float
     tilt_off_deg: float
+    spin_cmd: float = 0.0
+    spin_out: np.ndarray | None = None
+    v_paddle: np.ndarray | None = None
 
 
 @dataclass
@@ -63,6 +66,7 @@ class RallyPlayer:
     coop: CoopShot
     h: float
     rng: np.random.Generator
+    strategy: object = None       # optional shot strategy: callable(obs) -> (y_h, z_c, d_b) in the hitter's frame (RL)
     state: str = "WAIT"
     plan: SwingPlan | None = None
     shots: list[Shot] = field(default_factory=list)
@@ -72,7 +76,13 @@ class RallyPlayer:
         self.mpc = SwingMPC(self.m, self.ids, self.cfg, self.q_ready)
         q, z = self.q_ready, np.zeros_like(self.q_ready)
         self.traj = JointTrajectory([Quintic.fit(0.0, 1.0, q, z, z, q, z, z)])
-        self.t_hit, self.next_solve, self.y_target = np.inf, -np.inf, 0.0
+        self.t_hit, self.next_solve, self.y_target, self.spin_cmd = np.inf, -np.inf, 0.0, 0.0
+        self.z_target, self.d_choice = None, None
+        self.ctx = {"own_rail": 0.0, "opp_rail": 0.0}
+        self.decisions: list = []              # (obs, action) per stroke when a strategy is used
+        self.pending = None                    # this ball's decision (or "fallback"); cleared after the stroke
+        self.fallbacks = 0                     # chosen shots that could not be made (cooperative shot used)
+        self.spin_downgrades = 0               # spin shots played flat because the spin was out of reach
 
     def desired(self, t: float):
         return self.plan(t) if self.state == "SWING" else self.traj(t)
@@ -80,6 +90,7 @@ class RallyPlayer:
     def tick(self, t, pos, vel, spin, my_turn: bool, bounced: bool) -> None:
         rc, mc = self.cfg["rally"], self.cfg["mpc"]
         if self.state == "SWING" and t >= self.plan.t_end:
+            self.pending = None                   # stroke finished: the next ball gets a new decision
             q_end, z = self.plan.q[-1], np.zeros_like(self.q_ready)
             self.traj = JointTrajectory([Quintic.fit(t, rc["return_time"], q_end, z, z, self.q_ready, z, z)])
             self.state = "RETURN"
@@ -94,20 +105,52 @@ class RallyPlayer:
         if pred is None or (self.state == "WAIT" and pred.t_rel > rc["plan_horizon"]):
             return
         replan = self.state == "SWING"
+        cc = self.cfg["coop"]
         if not replan:
             self.coop.new_stroke()
-            self.y_target = self.rng.uniform(*self.cfg["coop"].get("target_y_range", [0.0, 0.0]))
-        cp = self.coop.plan(pred.pos, pred.vel, y_c=self.y_target, replan=replan)
+            self.y_target = self.rng.uniform(*cc.get("target_y_range", [0.0, 0.0]))
+            self.z_target, self.d_choice = None, None
+            if self.strategy is not None:
+                if self.pending is None:          # the strategy decides ONCE per incoming ball
+                    from tt.strategy import features
+                    obs = features(pred, self.sign, self.cfg, self.ctx)
+                    y_h, z_c, d_b = self.strategy(obs)
+                    self.pending = (self.sign * y_h, z_c, d_b)
+                    self.decisions.append((obs, np.array([y_h, z_c, d_b])))
+                if self.pending != "fallback":
+                    self.y_target, self.z_target, self.d_choice = self.pending
+            spins = cc.get("spin_choices", [0.0])
+            if len(spins) > 1:            # draw only when there is a choice (keeps older configs' random streams)
+                self.spin_cmd = float(spins[self.rng.integers(len(spins))])
+            else:
+                self.spin_cmd = float(spins[0])
+        w_in = pred.spin if pred.spin is not None else spin
+        cp = self.coop.plan(pred.pos, pred.vel, y_c=self.y_target, replan=replan, w_in=w_in, spin_cmd=self.spin_cmd,
+                            z_c=self.z_target, dists=None if self.d_choice is None else [self.d_choice])
+        if cp is None and not replan and self.strategy is not None and self.pending != "fallback":
+            # the chosen shot cannot be made: fall back to the safe cooperative shot for this ball
+            self.pending, self.fallbacks = "fallback", self.fallbacks + 1
+            self.y_target, self.z_target, self.d_choice = 0.0, None, None
+            self.coop.new_stroke()
+            cp = self.coop.plan(pred.pos, pred.vel, y_c=0.0, w_in=w_in, spin_cmd=self.spin_cmd)
+        if (cp is not None and not replan and self.spin_cmd != 0.0 and
+                (cp.tilt_deg > self.coop.max_tilt or np.linalg.norm(cp.v_paddle) > cc.get("max_paddle_speed", np.inf))):
+            # reachable-spin gate: this spin needs a paddle angle / speed outside the arm's comfortable range -> play flat
+            self.spin_cmd, self.spin_downgrades = 0.0, self.spin_downgrades + 1
+            self.coop.new_stroke()
+            cp = self.coop.plan(pred.pos, pred.vel, y_c=self.y_target, w_in=w_in, spin_cmd=0.0,
+                                z_c=self.z_target, dists=None if self.d_choice is None else [self.d_choice])
         if cp is None:
             return
         c_star = pred.pos - self.h * cp.n
         q0, qd0, _ = self.desired(t)
-        plan = self.mpc.solve(t, q0, qd0, t + pred.t_rel, c_star, cp.n, cp.speed)
+        plan = self.mpc.solve(t, q0, qd0, t + pred.t_rel, c_star, cp.n, cp.speed, cp.v_paddle)
         self.solve_times.append(plan.solve_time)
         self.next_solve = t + mc["period"]
         if plan.success:
             self.plan, self.t_hit, self.state = plan, plan.t_hit, "SWING"
-            rec = Shot(self.name, t, plan.t_hit, c_star, cp.n, cp.speed, cp.v_out, cp.bounce_dist, cp.tilt_deg)
+            rec = Shot(self.name, t, plan.t_hit, c_star, cp.n, cp.speed, cp.v_out, cp.bounce_dist, cp.tilt_deg,
+                       cp.spin_cmd, cp.spin, cp.v_paddle)
             if replan and self.shots and self.shots[-1].t_hit > t - 1.0:
                 self.shots[-1] = rec
             else:
@@ -127,9 +170,14 @@ class RallyRun:
     tau_max: np.ndarray
     q_lo: np.ndarray
     q_hi: np.ndarray
+    decisions: dict | None = None
+    fallbacks: dict | None = None
+    spin_downgrades: dict | None = None
 
 
-def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, viewer=False, slowmo=1.0) -> RallyRun:
+def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, viewer=False, slowmo=1.0,
+              strategies: dict | None = None) -> RallyRun:
+    """strategies: optional {"A": callable, "B": callable} shot strategies (tt.strategy); None = config default."""
     rc, jc, cc = cfg["rally"], cfg["juggle"], cfg["control"]
     max_hits = max_hits or cfg["e2"]["max_hits"]
     sim = make_sim(cfg)
@@ -163,6 +211,9 @@ def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, vie
                          CoopShot(cfg, params, pred, table, -1.0, x_plane_a, z_cross), h,
                          np.random.default_rng([seed, 3])),
     }
+    for name, strat in (strategies or {}).items():
+        players[name].strategy = strat
+    rail = cfg["robot"].get("rail", {}).get("enabled", False)
     serve = Launcher(cfg, pred, table, x_plane_a).sample(np.random.default_rng(seed))
     aero.set_ball_state(m, d, serve.pos, serve.vel)
     mujoco.mj_forward(m, d)
@@ -180,6 +231,10 @@ def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, vie
         t = d.time
         p, v, w = aero.ball_state(d)
         if t + 1e-9 >= st["next_tick"]:
+            if rail:
+                qa, qb = d.qpos[ids_a.arm_qpos[0]], d.qpos[ids_b.arm_qpos[0]]
+                players["A"].ctx = {"own_rail": qa, "opp_rail": qb}
+                players["B"].ctx = {"own_rail": qb, "opp_rail": qa}
             for name, pl in players.items():
                 pl.tick(t, p, v, w, my_turn=(st["fault"] is None and st["receiver"] == name),
                         bounced=(st["receiver"] == name and st["rx_bounces"] == 1))
@@ -232,4 +287,6 @@ def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, vie
     simulate(m, d, t_max, control, cfg=cfg, video=video, viewer=viewer, slowmo=slowmo)
     return RallyRun(log.arrays(), hits, bounces, {k: p.shots for k, p in players.items()},
                     {k: p.solve_times for k, p in players.items()}, st["fault"] or "time limit", st["by"], seed,
-                    ids_a.tau_max.copy(), ids_a.q_lo.copy(), ids_a.q_hi.copy())
+                    ids_a.tau_max.copy(), ids_a.q_lo.copy(), ids_a.q_hi.copy(),
+                    {k: p.decisions for k, p in players.items()}, {k: p.fallbacks for k, p in players.items()},
+                    {k: p.spin_downgrades for k, p in players.items()})

@@ -37,8 +37,10 @@ class Launcher:
         y = np.concatenate([pos, vel]).astype(float)
         w, x_b, t = np.zeros(3), None, 0.0
         while t < self.lc["max_flight"]:
-            y_next, contact = self.pred._step_with_table(y, w, self.table)
-            if contact is not None and x_b is None:
+            y_next, contact, w = self.pred._step_with_table(y, w, self.table)
+            if contact is not None:
+                if x_b is not None:
+                    return None                     # second bounce before the hitting plane: not a valid serve
                 x_b = contact[0]                    # exact bounce x (smooth in the launch velocity)
             if y[0] > self.x_plane >= y_next[0]:
                 if x_b is None:

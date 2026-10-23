@@ -40,7 +40,15 @@ def rally(args):
     x_mid = cfg["table"]["near_edge_x"] + cfg["table"]["length"] / 2
     st = np.concatenate([np.asarray(v, float) for v in r.solve_times.values()])
     L = r.logs
+    spin_pairs = []                                  # (commanded top(+)/back(-)spin, achieved, along the topspin axis)
+    for who, e in r.hits:
+        sh = [x for x in r.shots[who] if abs(x.t_hit - e.t) < 0.05]
+        if sh:
+            d = np.array([e.v_out[0], e.v_out[1], 0.0])
+            axis = np.cross([0.0, 0.0, 1.0], d / np.linalg.norm(d))
+            spin_pairs.append((sh[-1].spin_cmd, float(e.w_out @ axis)))
     return dict(seed=seed, hits=len(r.hits), fault=r.fault, by=r.fault_by, wall=time.time() - t0,
+                spin_pairs=spin_pairs, downgrades=sum((r.spin_downgrades or {}).values()),
                 hit_y=[e.pos[1] for _, e in r.hits],
                 rail_range=[float(L[f"q_{k}"][:, 0].min()) for k in "AB"] + [float(L[f"q_{k}"][:, 0].max()) for k in "AB"]
                 if cfg["robot"].get("rail", {}).get("enabled", False) else None,
@@ -93,6 +101,9 @@ def main() -> None:
             ("ball height at impact: mean ± std [m]", f"{hz.mean():.3f} ± {hz.std():.3f}"),
             ("lateral hit position y: min / max / std [m]", "{:.2f} / {:.2f} / {:.2f}".format(
                 *(lambda y: (y.min(), y.max(), y.std()))(np.concatenate([r["hit_y"] for r in runs])))),
+            *spin_rows(runs),
+            *([("spin shots played flat by the reachable-spin gate", str(sum(r["downgrades"] for r in runs)))]
+              if any(r["downgrades"] for r in runs) else []),
             ("rail travel used: min / max [m]", "–" if runs[0]["rail_range"] is None else
              f"{min(min(r['rail_range'][:2]) for r in runs):.2f} / {max(max(r['rail_range'][2:]) for r in runs):.2f}"),
             ("paddle normal vs nominal: median / max [deg]", f"{np.median(np.concatenate([r['tilts'] for r in runs])):.1f} / {np.max(np.concatenate([r['tilts'] for r in runs])):.1f}"),
@@ -115,6 +126,19 @@ def main() -> None:
 
         r = run_rally(cfg, args.video_seed, args.video_hits, video=args.video, slowmo=args.slowmo)
         print(f"video: {args.video} ({len(r.hits)} hits, ended by '{r.fault}')")
+
+
+def spin_rows(runs):
+    pairs = np.array([p for r in runs for p in r["spin_pairs"]]).reshape(-1, 2)
+    if not len(pairs) or not np.any(pairs[:, 0]):
+        return []
+    rows = []
+    for c in sorted(set(pairs[:, 0])):
+        sel = pairs[:, 0] == c
+        kind = "topspin" if c > 0 else ("backspin" if c < 0 else "flat")
+        rows.append((f"{kind} shots (commanded {c:+.0f} rad/s): count, achieved mean ± std [rad/s]",
+                     f"{sel.sum()}, {pairs[sel, 1].mean():+.1f} ± {pairs[sel, 1].std():.1f}"))
+    return rows
 
 
 def plot(runs, cap, path):

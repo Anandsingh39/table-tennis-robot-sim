@@ -132,3 +132,41 @@ def make_law(cfg: dict, params: AeroParams, dt: float):
     """juggle.law: impact_targeting (default) | pd_tilt."""
     law = cfg["juggle"].get("law", "impact_targeting")
     return {"impact_targeting": ImpactTargetingLaw, "pd_tilt": PDTiltLaw}[law].from_config(cfg, params, dt)
+
+
+def grip_paddle_command(v_in, w_in, v_out, w_des, e_n, e_t, e_s, mass, radius, inertia, n0=None):
+    """Inverse of the racket-rubber contact (tt.contact.impact_grip): paddle normal n and contact-point
+    velocity v_c that turn (v_in, w_in) into v_out with the in-plane spin w_des.
+
+    With grip the tangential impulse couples velocity and spin: Δω = -(κ / r) n × Δv_t, so for a given
+    velocity change the spin is set by how far n is tilted away from (v_out - v_in). Unknowns: n (two
+    angles) and v_c (3); equations: v_out (3) and the spin components perpendicular to n (2; the spin
+    about n is only damped, e_s, not controllable). Solved by least squares from the frictionless solution.
+    Returns (n, v_c, w_out, residual).
+    """
+    from scipy.optimize import least_squares
+
+    from tt.contact import impact_grip
+
+    v_in, w_in, v_out, w_des = (np.asarray(x, float) for x in (v_in, w_in, v_out, w_des))
+    if n0 is None:
+        n0, s0 = paddle_command(v_in, v_out, e_n)
+    else:
+        s0 = float((v_out @ n0 + e_n * (v_in @ n0)) / (1.0 + e_n))
+
+    def nvec(a):
+        th, ph = a
+        return np.array([np.sin(th) * np.cos(ph), -np.sin(ph), np.cos(th) * np.cos(ph)])
+
+    def res(x):
+        n = nvec(x[:2])
+        vo, wo = impact_grip(v_in, w_in, n, x[2:], e_n, e_t, e_s, mass, radius, inertia)
+        dw = wo - w_des
+        dw = dw - (dw @ n) * n
+        return np.concatenate([vo - v_out, radius * dw])          # spin residual scaled to m/s
+
+    x0 = np.concatenate([[np.arctan2(n0[0], n0[2]), -np.arcsin(np.clip(n0[1], -1, 1))], s0 * n0])
+    sol = least_squares(res, x0, xtol=1e-12, ftol=1e-12, gtol=1e-12)
+    n = nvec(sol.x[:2])
+    _, w_out = impact_grip(v_in, w_in, n, sol.x[2:], e_n, e_t, e_s, mass, radius, inertia)
+    return n, sol.x[2:].copy(), w_out, float(np.linalg.norm(sol.fun))

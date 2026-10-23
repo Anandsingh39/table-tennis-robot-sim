@@ -25,3 +25,6 @@ MUJOCO_LOG.TXT
 !results/e2_rail_summary.md
 !results/e2_rail_rally.png
 !results/e2_rail_rally.mp4
+!results/e2_spin_v1_*
+!results/e2_spin_v2_*
+!results/related_work.md

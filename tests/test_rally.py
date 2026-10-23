@@ -104,3 +104,35 @@ def test_rail_kinematics_and_short_rally():
         assert np.allclose(np.array(fk.pos(q)).ravel(), p, atol=1e-9)
     r = run_rally(cfg3, seed=2, max_hits=3)
     assert r.fault == "max hits" and len(r.hits) == 3
+
+
+def test_grip_contact_inverse_round_trip():
+    """Spin: the grip paddle inverse reproduces the requested outgoing velocity and in-plane spin."""
+    from tt.contact import impact_grip
+    from tt.juggle_law import grip_paddle_command
+
+    m, r = 0.0027, 0.02
+    inertia = 2 / 3 * m * r ** 2
+    v_in, w_in = np.array([-3.2, 0.1, -2.8]), np.array([0.0, -40.0, 5.0])
+    v_out = np.array([2.9, 0.05, 4.1])
+    for spin in (-80.0, 0.0, 60.0):
+        w_des = spin * np.array([0.0, 1.0, 0.0])          # topspin axis for a ball going +x
+        n, v_c, w_out, res = grip_paddle_command(v_in, w_in, v_out, w_des, 0.8, 0.819, 0.805, m, r, inertia)
+        vo, wo = impact_grip(v_in, w_in, n, v_c, 0.8, 0.819, 0.805, m, r, inertia)
+        assert res < 1e-8 and np.allclose(vo, v_out, atol=1e-8)
+        dw = wo - w_des
+        assert np.linalg.norm(dw - (dw @ n) * n) < 1e-5
+
+
+def test_predictor_spinning_table_bounce_matches_contact_law():
+    """Spin: the predictor's table bounce (with friction) is the simulator's impulse law."""
+    from tt.contact import impact
+
+    tb = TableBounce((0.0, 3.0), (-1.0, 1.0), 0.78, 0.9, 0.25, 0.0027, 0.02, 2 / 3 * 0.0027 * 0.02 ** 2)
+    v, w = np.array([3.0, 0.2, -4.0]), np.array([0.0, 100.0, 10.0])
+    v1, w1 = tb.bounce(v, w)
+    v2, w2, _ = impact(v, w, np.array([0, 0, 1.0]), np.zeros(3), 0.9, 0.25, 0.0027, 0.02, 2 / 3 * 0.0027 * 0.02 ** 2)
+    assert np.allclose(v1, v2) and np.allclose(w1, w2)
+    v0, _ = tb.bounce(v, np.zeros(3))
+    vb, _ = tb.bounce(v, -w)
+    assert v1[0] > v0[0] > vb[0]              # topspin keeps more forward speed off the table than no spin; backspin checks

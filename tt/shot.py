@@ -20,7 +20,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from tt.aero import AeroParams, rk4_step
-from tt.juggle_law import paddle_command
+from tt.juggle_law import grip_paddle_command, paddle_command
 
 
 def fly_for(params: AeroParams, pos, vel, T: float, dt: float) -> np.ndarray:
@@ -113,7 +113,10 @@ class ReturnShot:
 class CoopPlan:
     v_out: np.ndarray
     n: np.ndarray
-    speed: float
+    speed: float             # paddle normal speed
+    v_paddle: np.ndarray     # paddle contact-point velocity (grip model: includes the brushing component)
+    spin: np.ndarray         # ball spin right after the hit (world frame)
+    spin_cmd: float          # commanded topspin (+) / backspin (-) magnitude [rad/s]
     tilt_deg: float          # angle between n and the mount's nominal normal
     bounce_dist: float       # planned bounce distance past the net on the partner's half [m]
     flight_time: float       # time from the hit to the partner's hitting plane [s]
@@ -149,14 +152,22 @@ at the first within good_tilt_deg), then kept for the re-plans (warm-started fro
         self.n_nom = np.array([sign * np.sin(tilt), 0.0, np.cos(tilt)])
         self.max_tilt = cfg["workspace_scan"]["max_tilt_deg"]
         self.good_tilt = cc["good_tilt_deg"]
+        con, bc = cfg["contact"], cfg["ball"]
+        self.grip = con.get("paddle_model", "coulomb") == "grip"
+        self.e_t, self.e_s = con.get("paddle_tangential_restitution", 0.0), con.get("paddle_spin_damping", 1.0)
+        self.mass, self.radius = bc["mass"], bc["radius"]
+        self.inertia = (2.0 / 3.0 if bc["hollow_shell"] else 0.4) * bc["mass"] * bc["radius"] ** 2
+        self.spin_iters = cc.get("spin_iters", 2)
+        self.w_aim = np.zeros(3)                 # spin assumed in flight while aiming
+        self.z_target = partner_cross_z          # crossing height at the partner's plane (strategies may change it)
         self.d_b, self.d_last, self.v_prev = None, None, None
 
     def _events(self, start, vel):
         """(bounce x, (y, z) at the partner's plane, time to the plane) or None; stops at the outcome."""
         y = np.concatenate([start, vel]).astype(float)
-        w, x_b, t, s = np.zeros(3), None, 0.0, self.sign
+        w, x_b, t, s = self.w_aim.copy(), None, 0.0, self.sign
         while t < self.max_flight:
-            y_next, contact = self.pred._step_with_table(y, w, self.table)
+            y_next, contact, w = self.pred._step_with_table(y, w, self.table)
             if contact is not None:
                 if x_b is not None or (contact[0] - self.x_mid) * s <= 0:
                     return None                                 # second bounce, or bounce on the hitter's half
@@ -176,7 +187,7 @@ at the first within good_tilt_deg), then kept for the re-plans (warm-started fro
         if ev is None:
             return np.array([10.0, 10.0, 10.0])
         xb, yz, _ = ev
-        return np.array([xb - x_b, yz[0] - y_c, yz[1] - self.z_c])
+        return np.array([xb - x_b, yz[0] - y_c, yz[1] - self.z_target])
 
     def _guesses(self, start, x_b, y_c):
         cands = []
@@ -199,25 +210,52 @@ at the first within good_tilt_deg), then kept for the re-plans (warm-started fro
                 return sol.x, float(np.linalg.norm(sol.fun)), ev[2]
         return None
 
-    def plan(self, p_hit, v_in, y_c: float = 0.0, replan: bool = False) -> CoopPlan | None:
+    def _paddle(self, v_in, w_in, v_out, spin_cmd):
+        """Paddle normal / velocity and resulting ball spin for v_out with the commanded top/backspin."""
+        if not self.grip:
+            n, s = paddle_command(v_in, v_out, self.e)
+            return n, s * n, np.asarray(w_in, float).copy()
+        d = np.array([v_out[0], v_out[1], 0.0])
+        w_des = spin_cmd * np.cross([0.0, 0.0, 1.0], d / np.linalg.norm(d))     # topspin axis = z x direction
+        n, v_c, w_out, _ = grip_paddle_command(v_in, w_in, v_out, w_des, self.e, self.e_t, self.e_s,
+                                               self.mass, self.radius, self.inertia)
+        return n, v_c, w_out
+
+    def plan(self, p_hit, v_in, y_c: float = 0.0, replan: bool = False, w_in=None,
+             spin_cmd: float = 0.0, z_c: float | None = None, dists: list | None = None) -> CoopPlan | None:
+        """Shot for this stroke. With the grip paddle model the ball leaves with spin (spin_cmd > 0 topspin,
+        < 0 backspin); the aim then uses that spin in flight (Magnus, spin-dependent table bounce): aim with the
+        spin, solve the paddle for it, re-aim with the spin actually produced (spin_iters times)."""
+        w_in = np.zeros(3) if w_in is None else np.asarray(w_in, float)
+        self.z_target = self.z_c if z_c is None else z_c        # a strategy may aim above/below the partner's zone
         best = None
         if replan and self.d_b is not None:
             dists = [self.d_b]
+        elif dists is not None:
+            pass                                                # strategy-chosen bounce distance(s)
         else:   # nearest to the last stroke's choice first; stop at the first good-enough tilt
             ref = self.d_last if self.d_last is not None else float(np.median(self.dists))
             dists = sorted(self.dists, key=lambda d: abs(d - ref))
         for d in dists:
             x_b = self.x_mid + self.sign * d
-            # warm start from the last solution (previous re-plan or previous stroke); grid only as a fallback
-            res = self._aim(p_hit, x_b, y_c, [self.v_prev]) if self.v_prev is not None else None
-            if res is None:
-                res = self._aim(p_hit, x_b, y_c, self._guesses(p_hit, x_b, y_c)[:3])
+            d_dir = np.array([self.sign, 0.0, 0.0])
+            self.w_aim = spin_cmd * np.cross([0.0, 0.0, 1.0], d_dir) if self.grip else np.zeros(3)
+            res = None
+            for _ in range(self.spin_iters if self.grip else 1):
+                # warm start from the last solution (previous re-plan or previous stroke); grid only as a fallback
+                res = self._aim(p_hit, x_b, y_c, [self.v_prev]) if self.v_prev is not None else None
+                if res is None:
+                    res = self._aim(p_hit, x_b, y_c, self._guesses(p_hit, x_b, y_c)[:3])
+                if res is None:
+                    break
+                n, v_c, w_out = self._paddle(v_in, w_in, res[0], spin_cmd)
+                self.w_aim = w_out if self.grip else np.zeros(3)
             if res is None:
                 continue
             v_out, miss, T = res
-            n, s = paddle_command(v_in, v_out, self.e)
+            s = float(v_c @ n)
             tilt = float(np.degrees(np.arccos(np.clip(n @ self.n_nom, -1, 1))))
-            plan = CoopPlan(v_out, n, s, tilt, d, T, miss)
+            plan = CoopPlan(v_out, n, s, v_c, w_out, spin_cmd, tilt, d, T, miss)
             key = (tilt <= self.max_tilt, -tilt)
             if best is None or key > best[0]:
                 best = (key, plan)

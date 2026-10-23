@@ -1,0 +1,38 @@
+# Extra credit: two-robot rally on rails WITH SPIN (topspin / backspin / flat shots).
+# Deep-merged on top of rally_rail.yaml. Spin physics from the literature instead of the frictionless baseline.
+extends: rally_rail.yaml
+
+aero:
+  # Magnus force F_M = C_M rho V (w x v), V = 4/3 pi r^3  [arXiv:2606.28805 eq. 2, Sony/Dürr robot, fit to pro matches];
+  # C_M ~ 0.2-0.33 for our speeds (3.5-7.5 m/s) and spins (<= 200 rad/s) [same, Table II] -> C_M = 0.25.
+  # Our form is 1/2 rho C_m A r (w x v) (Nakashima), so C_m = (8/3) C_M = 0.667.
+  magnus_coefficient: 0.667
+
+contact:
+  # Racket rubber grip model (Nakashima base model as fitted in arXiv:2606.28805 Sec. III-D, Table IV):
+  # the contact point's tangential velocity reverses with e_t, spin about the normal is damped by e_s.
+  paddle_model: grip
+  paddle_tangential_restitution: 0.819     # e_t,0 [arXiv:2606.28805 Table IV] (velocity term e_t,1 = -0.010 neglected)
+  paddle_spin_damping: 0.805               # e_s   [arXiv:2606.28805 Table IV]
+  table_friction: 0.25                     # dynamic friction ball-table [arXiv:2606.28805 eq. 9, following Nakashima]
+
+coop:
+  # With spin physics the reachable cooperative shots move deeper (scan, this config): backspin 120 rad/s bounces
+  # 0.8-1.0 m past the net (paddle 1.8-2.2 m/s), flat ~0.8 m, topspin 60 rad/s ~0.6 m (2.8 m/s), topspin 120 ~0.4 m
+  # but needs ~3.6 m/s paddle speed (beyond the arm). The law tries these bounce distances per stroke.
+  spin_choices: [-50.0, 0.0, 60.0]         # rad/s [assumed] backspin / flat / topspin per stroke. First 20-rally run with -80: backspin
+                                           # achieved -72.7 ± 14.7 and 15/20 rallies saturated -> gentler backspin + reachable-spin gate
+  max_paddle_speed: 2.6                    # m/s [assumed] spin shots needing a faster paddle are played flat (E0: 2.35 m/s tracked well)
+  bounce_dists: [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]   # m [scan] candidate bounce distances past the net
+  spin_iters: 2                            # aim with the spin, solve the paddle, re-aim with the spin actually produced
+
+launcher:
+  # with table friction a spin-free serve picks up topspin at the bounce and dives: feasible serves bounce at x <= ~1.35 m
+  bounce_x_range: [1.20, 1.35]             # m [scan, this config]
+  cross_z_range: [0.88, 0.92]              # m [scan, this config]
+
+mpc:
+  full_velocity: true                      # constrain the full paddle velocity at impact (brushing component makes the spin)
+
+ball:
+  material: ball_marked                    # checker texture so the rotation is visible in the video

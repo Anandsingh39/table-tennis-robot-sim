@@ -9,8 +9,8 @@ by up to a dt^2 / 8 ~ 30 um (~9 us) at dt = 5 ms.
 Events:
   crossing()        juggling: ball centre descends through z = z_cross;
   plane_crossing()  rally: ball centre crosses a plane coord[axis] = value moving in `direction`,
-                    optionally only after a bounce on the table (TableBounce, same frictionless
-                    impulse as M3: v_z -> -e_t v_z when the centre reaches the table top + r).
+                    optionally only after a bounce on the table (TableBounce: the same impulse law as
+                    M3, frictionless v_z -> -e_t v_z, or with table friction the spin-dependent bounce).
 The predictor uses its own nominal parameters, so model mismatch is possible.
 """
 
@@ -29,6 +29,7 @@ class Prediction:
     pos: np.ndarray       # ball centre at the event
     vel: np.ndarray       # ball velocity at the event (v_in)
     bounced: bool = False
+    spin: np.ndarray | None = None   # ball spin (world frame) at the event
 
 
 @dataclass(frozen=True)
@@ -36,14 +37,30 @@ class TableBounce:
     x_range: tuple[float, float]
     y_range: tuple[float, float]
     z_contact: float      # ball centre height at contact = table top + ball radius
-    e: float              # table restitution (normal), frictionless
+    e: float              # table restitution (normal)
+    mu: float = 0.0       # table friction (Coulomb, sliding/rolling as M3); 0 = frictionless
+    mass: float = 0.0027
+    radius: float = 0.02
+    inertia: float = 2.0 / 3.0 * 0.0027 * 0.02 ** 2
 
     @classmethod
     def from_config(cls, cfg: dict, e_t: float) -> "TableBounce":
-        tc = cfg["table"]
+        tc, bc = cfg["table"], cfg["ball"]
         x0 = tc["near_edge_x"]
+        inertia = (2.0 / 3.0 if bc["hollow_shell"] else 0.4) * bc["mass"] * bc["radius"] ** 2
         return cls((x0, x0 + tc["length"]), (-tc["width"] / 2, tc["width"] / 2),
-                   tc["top_height"] + cfg["ball"]["radius"], e_t)
+                   tc["top_height"] + bc["radius"], e_t, cfg["contact"]["table_friction"],
+                   bc["mass"], bc["radius"], inertia)
+
+    def bounce(self, v: np.ndarray, w: np.ndarray):
+        """Post-bounce (v, w): the same impulse law as the simulator's table contact (tt.contact.impact)."""
+        if self.mu == 0.0:
+            return np.array([v[0], v[1], -self.e * v[2]]), w
+        from tt.contact import impact
+
+        v_new, w_new, _ = impact(v, w, np.array([0.0, 0.0, 1.0]), np.zeros(3), self.e, self.mu,
+                                 self.mass, self.radius, self.inertia)
+        return v_new, w_new
 
     def on_table(self, x: float, y: float) -> bool:
         return self.x_range[0] <= x <= self.x_range[1] and self.y_range[0] <= y <= self.y_range[1]
@@ -88,19 +105,18 @@ class BallPredictor:
         return None
 
     def _step_with_table(self, y, w, table: TableBounce | None):
-        """One RK4 step; if the ball reaches the table top inside the step, bounce there.
-
-        Returns (y_next, contact) with contact = ball centre at the bounce (exact within the step) or None."""
+        """One RK4 step; if the ball reaches the table top inside the step, bounce there (spin-dependent
+        with table friction). Returns (y_next, contact, w_next); contact = ball centre at the bounce or None."""
         y_next = rk4_step(y, w, self.p, self.dt)
         if (table is not None and y_next[5] < 0 and y[2] > table.z_contact >= y_next[2]):
             tau = _event_time_in_step(y, y_next, self.dt, 2, table.z_contact)
             yc = _state_at(y, y_next, self.dt, tau)
             if table.on_table(yc[0], yc[1]):
                 contact = yc[:3].copy()
-                yc[5] = -table.e * yc[5]
+                yc[3:], w = table.bounce(yc[3:], w)
                 rest = self.dt - tau
-                return (rk4_step(yc, w, self.p, rest) if rest > 1e-12 else yc), contact
-        return y_next, None
+                return (rk4_step(yc, w, self.p, rest) if rest > 1e-12 else yc), contact, w
+        return y_next, None, w
 
     def plane_crossing(self, pos, vel, spin, axis: int, value: float, direction: float,
                        table: TableBounce | None = None, require_bounce: bool = False,
@@ -113,13 +129,13 @@ class BallPredictor:
         w = np.asarray(spin, float)
         bounced, t = already_bounced, 0.0
         while t < self.horizon:
-            y_next, contact = self._step_with_table(y, w, table)
+            y_next, contact, w = self._step_with_table(y, w, table)
             bounced |= contact is not None
             crossed = (y[axis] - value) * direction < 0 <= (y_next[axis] - value) * direction
             if crossed and (bounced or not require_bounce):
                 tau = _event_time_in_step(y, y_next, self.dt, axis, value)
                 yc = _state_at(y, y_next, self.dt, tau)
-                return Prediction(t + tau, yc[:3], yc[3:], bounced)
+                return Prediction(t + tau, yc[:3], yc[3:], bounced, w.copy())
             if y_next[2] < (table.z_contact - 0.5 if table else -np.inf):
                 return None                       # fell well below the table: no hit possible
             y, t = y_next, t + self.dt
@@ -132,7 +148,7 @@ class BallPredictor:
         ts, ys, bs = [0.0], [y.copy()], [False]
         t = 0.0
         while t < t_end - 1e-12:
-            y, contact = self._step_with_table(y, w, table)
+            y, contact, w = self._step_with_table(y, w, table)
             t += self.dt
             ts.append(t)
             ys.append(y.copy())
