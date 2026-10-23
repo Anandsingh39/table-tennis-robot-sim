@@ -31,10 +31,14 @@ from tt.model import build_model  # noqa: E402
 
 def evaluate(m, ids, cfg, c, q_seed, d):
     ws = cfg["workspace_scan"]
-    up = np.array([0.0, 0, 1])
-    normals = [up] + [Rotation.from_euler(ax, s * ws["max_tilt_deg"], degrees=True).apply(up)
+    # nominal paddle normal: vertical (juggling) or tilted toward +x about y (rally); variations of
+    # ±max_tilt are applied about the world x and y axes on top of it
+    R_nom = Rotation.from_euler("y", ws.get("nominal_tilt_deg", 0.0), degrees=True)
+    up = R_nom.apply([0.0, 0, 1])
+    normals = [up] + [(Rotation.from_euler(ax, s * ws["max_tilt_deg"], degrees=True) * R_nom).apply([0.0, 0, 1])
                       for ax in "xy" for s in (1, -1)]
-    targets = [(c, n) for n in normals] + [(c + np.asarray(cfg["ready_pose"]["offset_from_hit_center"]), up)]
+    ready_n = np.asarray(cfg["ready_pose"]["paddle_normal"], float)
+    targets = [(c, n) for n in normals] + [(c + np.asarray(cfg["ready_pose"]["offset_from_hit_center"]), ready_n)]
     sols, margin = [], np.inf
     for p_t, n_t in targets:
         q, p, n = solve_paddle_pose_cfg(m, ids, cfg, p_t, n_t, q0=q_seed)

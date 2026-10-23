@@ -12,9 +12,23 @@ DEFAULT_CONFIG = REPO / "config" / "default.yaml"
 RESULTS = REPO / "results"
 
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config(path: str | Path | None = None) -> dict:
-    with open(path or DEFAULT_CONFIG) as f:
-        return yaml.safe_load(f)
+    """Load a config. A file with `extends: <other.yaml>` (relative to its folder) is deep-merged on top of it."""
+    path = Path(path or DEFAULT_CONFIG)
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    parent = cfg.pop("extends", None)
+    return _deep_merge(load_config(path.parent / parent), cfg) if parent else cfg
+
+
+RALLY_CONFIG = REPO / "config" / "rally.yaml"
 
 
 def ready_paddle_pos(cfg: dict) -> np.ndarray:

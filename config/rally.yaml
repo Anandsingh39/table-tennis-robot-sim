@@ -1,0 +1,87 @@
+# Extra credit (E1/E2): rally configuration. Deep-merged on top of default.yaml; only the
+# differences from the juggling setup are listed here. Sources as in default.yaml.
+extends: default.yaml
+
+paddle:
+  # Model modification for the rally: blade pre-tilted 40 deg toward the tool axis (an "open racket
+  # face"): paddle frame = Ry(90 + 40 deg) in the ee_base_link frame, vs Ry(90 deg) for juggling.
+  # E0 (results/e0_feasibility.md): forward tilts of 40-60 deg are reachable only with this mount.
+  flange_quat: [0.42261826, 0.0, 0.90630779, 0.0]   # [E0] (w, x, y, z) = (cos 65°, 0, sin 65°, 0)
+
+workspace_scan:
+  nominal_tilt_deg: 40.0          # deg [E0] rally paddle normal tilted toward the opponent (+x)
+  max_tilt_deg: 15.0              # deg [assumed] variation around it the shot law may command
+  ball_column_clearance: 0.0      # m  juggling-only check (ball falls vertically onto the paddle)
+  x_range: [0.15, 0.60]           # m
+  z_range: [0.85, 1.40]           # m
+
+hit:
+  # Paddle centre at impact for a nominal rally shot. [measured in sim] scripts/workspace_scan.py
+  # --config config/rally.yaml: best manipulability at (0.40, 0, 0.875) on the lower edge of the
+  # feasible band (results/e1_workspace.png); moved 2.5 cm up into the band for margin.
+  center: [0.40, 0.0, 0.90]
+
+shot:
+  # M6 rally: return-shot law (tt/shot.py)
+  target: [0.75, 0.0]             # [assumed] landing point as a fraction of the opponent half along x (0 = net, 1 = end line) and y [m]
+  candidate_times: [0.6, 0.7, 0.8, 0.9, 1.0, 1.1]   # s [assumed] flight times searched on the first plan of a stroke
+  net_margin: 0.03                # m [assumed] ball centre at least this far above net top + r
+  dt: 0.005                       # s [assumed] RK4 step (as the predictor)
+  newton_iters: 8                 # [assumed]
+  newton_tol: 1.0e-4              # m [assumed] landing miss of the shooting solve
+  fd_step: 1.0e-4                 # m/s [assumed] finite-difference step for the shooting Jacobian
+
+rally:
+  plan_horizon: 0.40              # s [assumed] start the swing when the predicted impact is this close (MPC solves the whole stroke)
+  predictor_horizon: 3.0          # s [assumed]
+  return_time: 0.50               # s [assumed] follow-through end -> ready pose
+  fall_margin: 0.10               # m [assumed] ball centre this far below the table top = episode over
+  max_episode_time: 4.0           # s [assumed]
+
+mpc:
+  # M7 rally: MPC swing (tt/mpc.py)
+  period: 0.02                    # s [plan E1] re-solve at 50 Hz (shrinking horizon) ...
+  freeze_time: 0.03               # s [assumed] ... until this long before the impact
+  n_pre: 20                       # [assumed] intervals from now to the impact (shrinking horizon: interval length shrinks)
+  n_post: 10                      # [assumed] intervals of the follow-through
+  follow_through_time: 0.35       # s [assumed] impact -> arm at rest
+  joint_margin: 0.05              # rad [assumed] stay this far inside the joint limits
+  speed_factor: 1.0               # [OpenArm docs] joint speeds limited to the motors' rated speeds (robot.joint_speed_rated)
+  acc_safety: 0.5                 # [assumed] fraction of the torque budget (diagonal inertia approximation) used for the acceleration limits
+  normal_tol_deg: 1.0             # deg [assumed] paddle normal at impact within this of the commanded one (with the tangent equalities it is exact)
+  w_end: 1.0                      # [assumed] weight on ending the follow-through near the ready pose (rad^-2 vs (rad/s^2)^2 s)
+  max_iter: 300                   # [assumed] IPOPT
+  tol: 1.0e-6                     # [assumed] IPOPT
+
+launcher:
+  # E1 stand-in opponent (tt/launcher.py); all ranges sampled uniformly with the run seed
+  x: 3.70                         # m [assumed] 0.31 m behind the far end line (table ends at x = 3.39)
+  y_range: [-0.20, 0.20]          # m [assumed]
+  z: 0.90                         # m [assumed] launch height (like a paddle at the far hit height)
+  bounce_x_range: [1.40, 1.90]    # m [assumed] bounce on the robot's half (0.65 .. 2.02); slow balls can only come down through the hit zone after a bounce this far out
+  cross_y_range: [-0.03, 0.03]    # m [assumed] lateral spread at the hitting plane (no rail yet)
+  cross_z_range: [0.88, 0.96]     # m [assumed] ball height at the hitting plane (inside the reachable band)
+  grid_vx: [-8.0, -2.0, 0.5]      # m/s [assumed] coarse grid for the initial guess (start, stop, step)
+  grid_vz: [-1.0, 5.0, 0.5]       # m/s [assumed]
+  grid_accept: 0.30               # m [assumed] grid points with a residual below this are candidates
+  speed_slack: 1.0                # m/s [assumed] keep candidates at most this much faster than the slowest one
+  starts: 5                       # [assumed] local solves tried per sample
+  diff_step: 1.0e-4               # [assumed] relative finite-difference step for least_squares
+  max_flight: 3.0                 # s
+  tol: 1.0e-3                     # m [assumed] launch solve accuracy
+  max_tries: 20
+
+ready_pose:
+  paddle_normal: [0.64278761, 0.0, 0.76604444]   # [E0] 40 deg toward +x (wait facing the opponent)
+  offset_from_hit_center: [-0.10, 0.0, -0.05]    # m [assumed] wait behind/below the hit zone; strokes move forward-up into the ball
+
+e1:
+  balls: 100                      # [plan E1] hit rate and landing-error statistics over 100 balls
+  workers: 22                     # [assumed]
+
+render:
+  # side view of the whole table (rally)
+  lookat: [1.6, 0.0, 1.35]        # m
+  distance: 4.8                   # m
+  azimuth: 110.0                  # deg
+  elevation: -16.0                # deg

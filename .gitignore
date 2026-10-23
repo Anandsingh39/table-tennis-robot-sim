@@ -15,3 +15,7 @@ MUJOCO_LOG.TXT
 !results/mc_summary.csv
 !results/replication_table.md
 !results/e0_feasibility.md
+!results/e1_summary.md
+!results/e1_landing.png
+!results/e1_return.mp4
+!results/e1_workspace.png
