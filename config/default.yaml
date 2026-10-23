@@ -22,6 +22,11 @@ robot:
   # Bodies removed with the gripper (the paddle replaces it).           [OpenArm]
   gripper_bodies: [openarm_right_ee_inner_finger, openarm_right_ee_outer_finger]
   stand_half_width: 0.04          # m  [assumed] visual-only column from the floor to the shoulder
+  # Joint speed limits (not in the MJCF). [OpenArm docs, docs.openarm.dev/1.0/hardware/specifications/motor, 24 V]
+  # joints 1-2 DM-J8009P (100 / 160 rpm), joints 3-4 DM4340 (36 / 52 rpm), joints 5-7 DM-J4310 (120 / 200 rpm);
+  # motor-to-joint mapping inferred from the matching peak torques 40 / 27 / 7 N·m in the MJCF.
+  joint_speed_rated: [10.47, 10.47, 3.77, 3.77, 12.57, 12.57, 12.57]     # rad/s (rated speed)
+  joint_speed_max: [16.76, 16.76, 5.45, 5.45, 20.94, 20.94, 20.94]       # rad/s (max no-load speed)
 
 paddle:
   # Mount ("flange") point in the ee_base_link frame = where the stock gripper fingers attach.
@@ -190,6 +195,20 @@ monte_carlo:
     - {name: PD-tilt law,     overrides: {juggle.law: pd_tilt}}
     - {name: PD-tilt law sigma 10 mm, overrides: {juggle.law: pd_tilt, sensing.pos_noise_std: 0.010}}
     - {name: PD-tilt law Kd 0, overrides: {juggle.law: pd_tilt, juggle.pd_kd: 0.0}}       # position-only tilt
+
+rally_feasibility:
+  # Extra credit E0 (scripts/rally_feasibility.py)
+  flight_times: [0.6, 0.8, 1.0, 1.2]    # s [assumed] cooperative shots, hit centre -> middle of the far half
+  dt: 0.002                       # s [assumed] RK4 step for the shot search
+  tilts: [20, 30, 40, 50, 60]     # deg [assumed] forward paddle tilts to test (rally shots need ~22-68 deg)
+  mount_pretilts: [0, 40]         # deg [assumed] paddle mount pre-tilt toward the tool axis (0 = juggling mount)
+  x_range: [0.15, 0.66]           # m [assumed]
+  z_range: [0.85, 1.46]           # m [assumed]
+  step: 0.05                      # m [assumed]
+  min_joint_margin: 0.15          # rad [assumed]
+  ik_seed_offsets: [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, -0.5, 0, 0, 0], [-0.6, 0, 0, 0, 0, 0, 0], [0.6, 0, 0, 0.3, 0, 0, 0]]  # rad [assumed] multi-start IK
+  workers: 10                     # [assumed]
+  stroke: {hit_center: [0.50, 0.0, 0.90], tilt_deg: 30.0, speed: 2.35, approach_time: 0.4}   # [assumed] reachable rally-like stroke (1.0 s lob needs ~33 deg, 2.35 m/s)
 
 tracking:
   settle_time: 0.2                # s  [assumed] hold the ready pose before the stroke starts

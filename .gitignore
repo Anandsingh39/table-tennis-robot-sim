@@ -14,3 +14,4 @@ MUJOCO_LOG.TXT
 !results/mc_summary.md
 !results/mc_summary.csv
 !results/replication_table.md
+!results/e0_feasibility.md
