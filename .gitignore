@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 results/*
 !results/model_report.md
+MUJOCO_LOG.TXT

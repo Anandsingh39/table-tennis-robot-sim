@@ -1,0 +1,87 @@
+# All physical parameters and tunable gains/thresholds for the table tennis
+# juggling simulation. Every entry carries its source:
+#   [ITTF] ITTF regulation, [plan] CLAUDE.md design choice, [OpenArm] value in the
+#   openarm-mujoco 2.3.0 MJCF, [std] standard physical constant,
+#   [assumed] assumed — tunable.
+# Units: SI (m, kg, s, rad, N, N·m) unless stated otherwise.
+
+physics:
+  timestep: 0.001                 # s  [plan §4] 1 kHz physics
+  gravity: [0.0, 0.0, -9.81]      # m/s^2  [std]
+  integrator: implicitfast        # [assumed] MuJoCo's recommended integrator; joint damping treated implicitly. Revisit in Phase 2 (ballistic accuracy)
+
+robot:
+  # Where the OpenArm v2 `arm_origin` site (the bimanual model root) is placed in the world.
+  # [assumed] shoulder height 1.20 m puts the home-pose paddle ~0.22 m above the table top;
+  # y = 0.1535 m cancels the right arm's lateral offset so the paddle sits on the table's center line.
+  base_pos: [0.0, 0.1535, 1.20]
+  arm_prefix: openarm_right_      # [OpenArm] joint/body name prefix of the arm we keep; the left arm is removed
+  removed_arm_body: openarm_left_base_link   # [OpenArm] root body of the arm we remove
+  n_joints: 7                     # [OpenArm] joint1..joint7
+  ee_body: openarm_right_ee_base_link   # [OpenArm] body moved by joint7; the paddle is welded to it
+  # Bodies removed with the gripper (the paddle replaces it).           [OpenArm]
+  gripper_bodies: [openarm_right_ee_inner_finger, openarm_right_ee_outer_finger]
+  stand_half_width: 0.04          # m  [assumed] visual-only column from the floor to the shoulder
+
+paddle:
+  # Mount ("flange") point in the ee_base_link frame = where the stock gripper fingers attach.
+  flange_pos: [-0.00143, 0.0, -0.068]   # m  [OpenArm] finger body pos in ee_base_link
+  # Paddle frame orientation in the ee_base_link frame: handle along -z_ee (paddle +x),
+  # blade normal along +x_ee (paddle +z) = rotation of +90 deg about y.
+  # With this choice the blade faces straight up at the stock home pose (elbow 90 deg).
+  flange_quat: [0.70710678, 0.0, 0.70710678, 0.0]   # [plan] (w, x, y, z)
+  blade_radius: 0.075             # m  [plan §4] standard blade ~150 mm wide
+  blade_thickness: 0.008          # m  [plan §4] blade + rubbers, 6–10 mm
+  blade_mass: 0.10                # kg [assumed] blade + rubbers; thin-disk inertia from the cylinder geom
+  handle_length: 0.05             # m  [assumed] exposed handle between gripper flange and blade edge
+  handle_half_width: 0.012        # m  [assumed]
+  handle_half_thickness: 0.004    # m  [assumed]
+  handle_mass: 0.05               # kg [assumed]; total paddle 0.15 kg, within plan's 0.10–0.17 kg
+
+ball:
+  mass: 0.0027                    # kg [ITTF] 2.7 g
+  radius: 0.020                   # m  [ITTF] 40 mm diameter
+  # Thin hollow shell: I = 2/3 m r^2 (MuJoCo's default from the geom would be a solid sphere, 2/5 m r^2)  [std]
+  hollow_shell: true
+  init_offset_above_paddle: 0.6   # m  [plan Phase 5] drop height 0.5–0.8 m above the paddle
+
+table:
+  length: 2.74                    # m  [ITTF]
+  width: 1.525                    # m  [ITTF]
+  top_height: 0.76                # m  [ITTF]
+  thickness: 0.03                 # m  [assumed] visual
+  leg_half_width: 0.03            # m  [assumed] visual
+  near_edge_x: 0.55               # m  [assumed] robot stands behind its end line; the ready-pose paddle (x≈0.41) is just outside it
+  net_height: 0.1525              # m  [ITTF]
+  net_overhang: 0.1525            # m  [ITTF] net extends 15.25 cm beyond each side line
+
+ready_pose:
+  # The ready pose is solved by IK (tt/kinematics.py) from these targets, not hard-coded.
+  paddle_pos: [0.41, 0.0, 0.98]   # m  [assumed] provisional; Phase 4 picks the final hit-plane height z_h
+  paddle_normal: [0.0, 0.0, 1.0]  # [plan] paddle horizontal, facing up
+  q_nominal: [0.0, 0.25, 0.0, 1.5708, 0.0, 0.0, 0.0]  # rad [assumed] posture prior: elbow 90°, shoulder abducted 0.25 rad away from joint2's -0.17 rad limit
+  ik_weight_pos: 1.0              # [assumed] residual weight on paddle position (m)
+  ik_weight_normal: 1.0           # [assumed] residual weight on paddle normal (unit vector)
+  ik_weight_posture: 0.01         # [assumed] residual weight pulling q toward q_nominal (rad)
+  ik_tol: 1.0e-12                 # [assumed] least-squares tolerance (ftol/xtol/gtol)
+
+control:
+  # Phase 1 hold controller: tau = qfrc_bias(q, qdot) + Kp (q_d - q) - Kd qdot
+  hold_kp: [100.0, 100.0, 60.0, 60.0, 20.0, 20.0, 20.0]   # N·m/rad [assumed]
+  hold_kd: [5.0, 5.0, 3.0, 3.0, 1.0, 1.0, 1.0]            # N·m·s/rad [assumed]
+
+checks:
+  hold_duration: 2.0              # s  [plan Phase 1]
+  hold_max_drift: 0.001           # m  [plan Phase 1] paddle drift < 1 mm
+  ready_pose_pos_tol: 0.001       # m  [assumed] IK must reach the ready paddle position to within 1 mm
+  ready_pose_normal_tol_deg: 0.5  # deg [assumed] and the paddle normal to within 0.5 deg
+
+render:
+  width: 960                      # px
+  height: 720                     # px
+  fps: 60                         # [plan §0.7] 30–60 fps
+  # Free camera framing the paddle and the ball apex (~0.6 m above the paddle).
+  lookat: [0.35, 0.0, 1.15]       # m
+  distance: 2.2                   # m
+  azimuth: 135.0                  # deg
+  elevation: -15.0                # deg
