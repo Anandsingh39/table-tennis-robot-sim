@@ -1,0 +1,22 @@
+# RL add-on: self-play shot strategy on top of the E2 + rail rally (MPC still does the swing).
+# Deep-merged on top of rally_rail.yaml (no spin: spin planning is ~5x slower).
+extends: rally_rail.yaml
+
+strategy:
+  # action ranges in the hitter's frame
+  y_max: 0.80                     # m [assumed] lateral crossing point at the opponent's plane (table half width 0.76)
+  z_range: [0.80, 1.20]           # m [assumed] crossing height at the opponent's plane (its reachable band is ~0.85-0.95)
+  d_range: [0.35, 1.00]           # m [assumed] bounce distance past the net
+  coop_z: 0.918                   # m nominal crossing height = hit.center z + h n_z (the cooperative baseline aims here)
+  coop_d: 0.42                    # m E2 cooperative bounce distance
+
+selfplay:
+  generations: 20                 # [assumed]
+  population: 22                  # [assumed] candidates per generation (one per worker)
+  points_per_candidate: 6         # [assumed] half as player A, half as player B
+  elite_frac: 0.25                # [assumed] CEM elite fraction
+  init_std: 0.8                   # [assumed] initial parameter std
+  min_std: 0.05                   # [assumed]
+  max_hits: 10                    # [assumed] point cap (draw if reached)
+  workers: 22
+  eval_points: 60                 # [assumed] points per head-to-head evaluation match
