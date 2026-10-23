@@ -1,0 +1,9 @@
+mujoco==3.17.0
+openarm-mujoco==2.3.0
+mink==1.3.0
+numpy
+scipy
+pyyaml
+matplotlib
+imageio[ffmpeg]
+pytest
