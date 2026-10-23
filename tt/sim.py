@@ -29,9 +29,9 @@ class Sim:
             self.m, self.d, self.ids, self.q_ready, np.asarray(cc["hold_kp"]), np.asarray(cc["hold_kd"]))
 
 
-def make_sim(cfg: dict) -> Sim:
+def make_sim(cfg: dict, prescribed_paddle: bool = False) -> Sim:
     """Build the scene and put the arm at rest in the IK ready pose; ball at its model default."""
-    m, ids = build_model(cfg)
+    m, ids = build_model(cfg, prescribed_paddle)
     d = mujoco.MjData(m)
     q, p, n = ready_pose(m, ids, cfg)
     d.qpos[ids.arm_qpos] = q

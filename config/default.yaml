@@ -53,8 +53,20 @@ aero:
   magnus_coefficient: 0.0         # [plan] 0 = spin off for core juggling; set a literature value if spin is enabled
   # Spin decay (aerodynamic torque) is neglected: torque-free sphere -> world-frame spin is constant.  [assumed]
 
+contact:
+  # M3: analytic impulse model; MuJoCo contact between ball and paddle/table is disabled.
+  paddle_restitution: 0.8         # [plan §4] assumed, tunable (sweep 0.7–0.9; depends on rubber)
+  paddle_friction: 0.0            # Coulomb mu [plan §5] 0 = frictionless baseline
+  table_friction: 0.0             # Coulomb mu [assumed] 0 = frictionless baseline (table matters only for the rally)
+  # Table restitution is derived from the ITTF bounce rule, measured in air, so drag is
+  # accounted for: e_t = sqrt((exp(2 k h_r) - 1) / (1 - exp(-2 k h_d))), k = drag coefficient k_d.
+  # (Drag-free shortcut e_t = sqrt(23/30) = 0.876 would under-predict the rebound by ~1.5 cm.)
+  table_rule_drop_height: 0.30    # m [ITTF 2.1.3] drop height
+  table_rule_rebound_height: 0.23 # m [ITTF 2.1.3] "uniform bounce of about 23 cm"
+  rewind_to_impact_time: true     # [plan §5 tunneling guard] apply the impulse at the estimated crossing time, not at the step where penetration is detected
+
 table:
-  length: 2.74                   # m  [ITTF]
+  length: 2.74                  # m  [ITTF]
   width: 1.525                    # m  [ITTF]
   top_height: 0.76                # m  [ITTF]
   thickness: 0.03                 # m  [assumed] visual
@@ -93,6 +105,24 @@ checks:
   # Magnus coefficient used ONLY to exercise the Magnus term + spin-frame handling in the validation
   # (core config has spin off).  [assumed] order-of-magnitude test value, not a literature fit.
   ballistic_test_magnus_coefficient: 0.6
+  # Phase 3 contact tests
+  drop_height: 0.30               # m  [plan Phase 3] fall height of the ball centre to first contact
+  drop_duration: 1.5              # s  [assumed] long enough for several bounces, short of the Zeno point
+  drop_ratio_tol: 0.02            # [plan Phase 3] paddle rebound ratio vs e^2, relative
+  table_rebound_tol: 0.02         # [assumed] table rebound vs the ITTF 0.23 m, relative
+  impact_velocity_tol: 0.01       # [plan Phase 3] outgoing velocity vs Section 6 formula, relative
+  impact_check_delay: 0.1         # s  [assumed] compare MuJoCo vs an RK4 flight of the formula's v_out this long after impact
+  impact_step_phase: 0.37         # [assumed] impact placed 0.37 dt after a physics step, so detection sees real penetration
+  event_time_tol: 0.002           # s  [assumed] bounce times vs analytic (event-count test)
+  # Prescribed (mocap) paddle cases. tilt_deg = rotation about world x then y; paddle_vel in m/s.
+  # A case with v_out_des uses the Section 6 inverse law to pick the tilt and speed instead.
+  prescribed_paddle_pos: [0.40, 0.45, 1.00]   # m [assumed] beside the arm's paddle, clear of the arm
+  prescribed_paddle_cases:
+    - {name: moving up 0.5 m/s,   drop_height: 0.40, tilt_deg: [0.0, 0.0],   paddle_vel: [0.0, 0.0, 0.5]}
+    - {name: moving up 1.0 m/s,   drop_height: 0.40, tilt_deg: [0.0, 0.0],   paddle_vel: [0.0, 0.0, 1.0]}
+    - {name: tilted 15 deg,       drop_height: 0.40, tilt_deg: [15.0, 0.0],  paddle_vel: [0.0, 0.0, 0.0]}
+    - {name: tilted + moving,     drop_height: 0.40, tilt_deg: [10.0, -20.0], paddle_vel: [0.2, -0.1, 0.6]}
+    - {name: juggle-law inverse,  drop_height: 0.40, v_out_des: [0.15, -0.10, 2.80]}
 
 render:
   width: 960                      # px

@@ -33,6 +33,8 @@ BALL_BODY = "ball"
 BALL_JOINT = "ball_free"
 BALL_GEOM = "ball_geom"
 TABLE_TOP_GEOM = "table_top"
+PRESCRIBED_BODY = "paddle_prescribed"
+PRESCRIBED_SITE = "paddle_prescribed_center"
 NO_CONTACT = dict(contype=0, conaffinity=0)
 
 
@@ -55,6 +57,8 @@ class SceneIds:
     ball_dof: int               # first of 6 dofs (lin vel world, ang vel body-local)
     ball_geom: int
     table_top_geom: int
+    prescribed_mocap: int = -1  # mocap id of the test-only prescribed paddle (-1 if absent)
+    prescribed_site: int = -1
 
 
 def _arm_spec(cfg: dict) -> mujoco.MjSpec:
@@ -108,6 +112,15 @@ def _add_paddle(spec: mujoco.MjSpec, cfg: dict) -> None:
     paddle.add_site(name=PADDLE_SITE, pos=[L + R, 0, 0], size=[0.005, 0, 0], rgba=[0, 1, 0, 1])
 
 
+def _add_prescribed_paddle(spec: mujoco.MjSpec, cfg: dict) -> None:
+    """Test-only paddle blade on a mocap body (pose set by the test each step); body frame = paddle_center."""
+    pc = cfg["paddle"]
+    body = spec.worldbody.add_body(name=PRESCRIBED_BODY, mocap=True, pos=cfg["checks"]["prescribed_paddle_pos"])
+    body.add_geom(name="prescribed_blade", type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+                  size=[pc["blade_radius"], pc["blade_thickness"] / 2, 0], material="blade_red", **NO_CONTACT)
+    body.add_site(name=PRESCRIBED_SITE, size=[0.005, 0, 0], rgba=[0, 1, 0, 1])
+
+
 def _add_ball(spec: mujoco.MjSpec, cfg: dict) -> None:
     bc = cfg["ball"]
     pos = np.array(cfg["ready_pose"]["paddle_pos"]) + [0, 0, bc["init_offset_above_paddle"]]
@@ -150,7 +163,7 @@ def _add_table(spec: mujoco.MjSpec, cfg: dict) -> None:
                        material="stand", **NO_CONTACT)
 
 
-def build_spec(cfg: dict) -> mujoco.MjSpec:
+def build_spec(cfg: dict, prescribed_paddle: bool = False) -> mujoco.MjSpec:
     pc = cfg["physics"]
     scene = mujoco.MjSpec.from_file(str(SCENE_XML))
     scene.option.timestep = pc["timestep"]
@@ -168,6 +181,8 @@ def build_spec(cfg: dict) -> mujoco.MjSpec:
     _add_paddle(scene, cfg)
     _add_ball(scene, cfg)
     _add_table(scene, cfg)
+    if prescribed_paddle:
+        _add_prescribed_paddle(scene, cfg)
     return scene
 
 
@@ -177,7 +192,10 @@ def scene_ids(m: mujoco.MjModel, cfg: dict) -> SceneIds:
     jid = [m.joint(n).id for n in names]
     act = np.array([m.actuator(f"{n}_motor").id for n in names])
     ball_j = m.joint(BALL_JOINT).id
+    pid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, PRESCRIBED_BODY)
     return SceneIds(
+        prescribed_mocap=int(m.body_mocapid[pid]) if pid >= 0 else -1,
+        prescribed_site=mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, PRESCRIBED_SITE),
         joint_names=names,
         arm_qpos=np.array([m.jnt_qposadr[j] for j in jid]),
         arm_dof=np.array([m.jnt_dofadr[j] for j in jid]),
@@ -196,6 +214,6 @@ def scene_ids(m: mujoco.MjModel, cfg: dict) -> SceneIds:
     )
 
 
-def build_model(cfg: dict) -> tuple[mujoco.MjModel, SceneIds]:
-    m = build_spec(cfg).compile()
+def build_model(cfg: dict, prescribed_paddle: bool = False) -> tuple[mujoco.MjModel, SceneIds]:
+    m = build_spec(cfg, prescribed_paddle).compile()
     return m, scene_ids(m, cfg)
