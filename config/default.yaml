@@ -117,6 +117,25 @@ control:
   friction_ff: true               # [assumed] feed the model's dry joint friction (frictionloss) forward
   friction_smoothing: 0.01        # rad/s [assumed] tanh smoothing of sign(qd_d)
 
+sensing:
+  # M4 sensor — THE measurement-noise specification of this project.
+  ball_source: estimate           # estimate = juggle from the filtered noisy measurements (Phase 6+); true = simulator state (Phase 5)
+  rate: 200.0                     # Hz [plan §4] ball position samples
+  pos_noise_std: 0.002            # m  [plan §4] i.i.d. Gaussian per axis (baseline; sweep 0, 1, 2, 5, 10 mm in Phase 7)
+  latency: 0.0                    # s  [plan §4] delivery delay (0 or 0.010)
+  dropout_prob: 0.0               # [plan §4] probability a sample is lost (optional 0.02)
+
+estimator:
+  accel_noise_std: 0.05           # m/s^2 [tuned in sim] white-acceleration process noise. Sweep at sigma = 2 mm (15 bounces): q = 0.5 / 0.2 / 0.1 / 0.05 / 0.02 -> in-flight velocity error 39 / 20 / 12 / 7.6 / 5.6 mm/s per axis, impact RMS 29 / 18 / 8 / 3.8 / 2.5 mm. 0.05 keeps headroom for drag/restitution mismatch (Phase 7)
+  init_vel_std: 1.0               # m/s [assumed] velocity std at start / after a bounce with no velocity prior
+  reset_vel_std: 0.3              # m/s [assumed] velocity std after a bounce, around the velocity the robot commanded
+  bounce_nis_threshold: 16.27     # [std] chi^2(3) 99.9% quantile: innovation this unlikely = the ball was hit
+  bounce_gate_height: 0.05        # m [assumed] bounces are only accepted with the ball within 5 cm above its impact height
+  min_pos_std: 0.0002             # m [assumed] floor on the measurement std used inside the filter (keeps S invertible at sigma = 0)
+  settle_after_bounce: 0.10       # s [assumed] velocity RMSE "steady state" excludes this long after each detected bounce
+  report_time_to_impact: 0.10     # s [plan Phase 6] report the impact-point prediction error at this time before impact
+  tti_bin: 0.02                   # s [assumed] bin width for the prediction-error-vs-time-to-impact plot
+
 juggle:
   apex_height: 0.40               # m  [plan §4] apex of the ball centre above its impact height (~2.8 m/s impact speed)
   centering_gain: 0.5             # k_c [plan §6] 1 = deadbeat, ~0.5 = smoother

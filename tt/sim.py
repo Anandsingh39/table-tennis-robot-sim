@@ -57,14 +57,23 @@ class JuggleRun:
     z_impact: float
     seed: int
     tau_max: np.ndarray
+    predictions: list = None        # juggler predictions (t, t_hit_pred, p*, v_in)
+    detected_bounces: list = None   # estimator bounce detections (measurement times); None with true state
 
 
 def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None, video_duration=None,
                viewer: bool = False, slowmo: float = 1.0) -> JuggleRun:
-    """Drop the ball over the paddle and juggle it (true ball state) until max_bounces or failure."""
+    """Drop the ball over the paddle and juggle it until max_bounces or failure.
+
+    sensing.ball_source = "true": the juggler sees the simulator's ball state (Phase 5);
+    "estimate": it sees the EKF estimate built from noisy, possibly delayed/dropped measurements (Phase 6).
+    Randomness: initial offset from default_rng(seed); sensor noise from default_rng([seed, 1]).
+    """
     from tt.juggler import Juggler        # local import: juggler imports Sim from this module
+    from tt.sensing import BallEKF, BallSensor
 
     jc, cc = cfg["juggle"], cfg["control"]
+    use_estimate = cfg["sensing"]["ball_source"] == "estimate"
     max_bounces = max_bounces or jc["max_bounces"]
     sim = make_sim(cfg)
     m, d, ids = sim.m, sim.d, sim.ids
@@ -80,24 +89,44 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
     aero.set_ball_state(m, d, [xy0[0], xy0[1], juggler.z_impact + jc["drop_height"]], np.zeros(3))
     mujoco.mj_forward(m, d)
 
+    sensor = ekf = None
+    if use_estimate:
+        sensor = BallSensor(cfg, np.random.default_rng([seed, 1]))
+        ekf = BallEKF(cfg, params, juggler.z_impact,
+                      expected_v_out=lambda: juggler.plans[-1].v_out if juggler.plans else None)
+
     log = Logger()
     paddle_events: list = []
     status = {"failure": None, "next_tick": 0.0}
     state_code = {"POST": 0, "APPROACH": 1}
+    nan3 = np.full(3, np.nan)
 
     def control(m, d):
         t = d.time
         p, v, w = aero.ball_state(d)
+        meas = nan3
+        if use_estimate:
+            new = sensor.sample(t, p)
+            if new is not None:
+                meas = new.z
+            for mm in sensor.delivered(t):
+                ekf.update(mm)
+            p_hat, v_hat = ekf.state_at(t) if ekf.initialised else (nan3, nan3)
+            w_hat = np.zeros(3)                      # spin is not observed
+        else:
+            p_hat, v_hat, w_hat = p, v, w
         if t + 1e-9 >= status["next_tick"]:
-            juggler.tick(t, p, v, w)
+            if not np.isnan(p_hat[0]):
+                juggler.tick(t, p_hat, v_hat, w_hat)
             status["next_tick"] += jc["planner_period"]
         q_d, qd_d, qdd_d = juggler.desired(t)
         tau, sat = computed_torque(m, d, ids, q_d, qd_d, qdd_d, cc["ct_kp"], cc["ct_kd"], cc["friction_ff"],
                                    cc["friction_smoothing"])
         d.ctrl[ids.arm_act] = tau
         pp, pn = paddle_pose(m, d, ids)
-        log.log(t=t, ball_p=p, ball_v=v, q=d.qpos[ids.arm_qpos], qd=d.qvel[ids.arm_dof], q_d=q_d, qd_d=qd_d,
-                tau=tau, sat=sat, paddle_p=pp, paddle_n=pn, state=state_code[juggler.state])
+        log.log(t=t, ball_p=p, ball_v=v, meas=meas, est_p=p_hat, est_v=v_hat, q=d.qpos[ids.arm_qpos],
+                qd=d.qvel[ids.arm_dof], q_d=q_d, qd_d=qd_d, tau=tau, sat=sat, paddle_p=pp, paddle_n=pn,
+                state=state_code[juggler.state])
         for ev in contact.step(m, d):
             if ev.surface == "paddle":
                 paddle_events.append(ev)
@@ -116,4 +145,5 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
     failure = status["failure"]
     if failure is None and len(paddle_events) <= max_bounces:
         failure = "time limit"
-    return JuggleRun(log.arrays(), paddle_events, juggler.plans, failure, juggler.z_impact, seed, ids.tau_max.copy())
+    return JuggleRun(log.arrays(), paddle_events, juggler.plans, failure, juggler.z_impact, seed, ids.tau_max.copy(),
+                     juggler.predictions, ekf.bounces if ekf else None)

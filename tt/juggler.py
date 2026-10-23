@@ -47,6 +47,7 @@ class Juggler:
     t_hit: float = np.inf
     q_star: np.ndarray | None = None
     plans: list[PlanRecord] = field(default_factory=list)
+    predictions: list[tuple] = field(default_factory=list)   # (t, predicted impact time, p*, v_in) per tick
 
     def __post_init__(self):
         jc, pc = self.cfg["juggle"], self.cfg["paddle"]
@@ -69,6 +70,8 @@ class Juggler:
         if self.state == "APPROACH" and self.t_hit - t <= jc["freeze_time"]:
             return
         pred = self.predictor.crossing(pos, vel, spin, self.z_impact)
+        if pred is not None:
+            self.predictions.append((t, t + pred.t_rel, pred.pos, pred.vel))
         if pred is None or (self.state == "POST" and pred.t_rel > jc["plan_horizon"]):
             return
         n, s, v_out = self.law(pred.pos, pred.vel)

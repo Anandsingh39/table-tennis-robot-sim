@@ -1,4 +1,4 @@
-"""Phase 5 tests: predictor (M5), juggling law (M6), and a short end-to-end juggle."""
+"""Phase 5 tests: predictor (M5) and juggling law (M6). End-to-end juggles are in test_sensing.py."""
 
 import numpy as np
 import pytest
@@ -6,9 +6,7 @@ import pytest
 from tt.aero import AeroParams, rk4_rollout
 from tt.config import load_config
 from tt.juggle_law import ImpactTargetingLaw, frictionless_rebound, launch_speed_for_apex
-from tt.metrics import juggle_metrics
 from tt.predictor import BallPredictor
-from tt.sim import run_juggle
 
 
 @pytest.fixture(scope="module")
@@ -48,11 +46,3 @@ def test_law_on_centre_is_vertical_and_tilt_saturates(cfg):
     n, s, v_out = law(c + [0.5, 0, 0], np.array([3.0, 0.0, -2.8]))
     assert np.degrees(np.arccos(n[2])) == pytest.approx(cfg["juggle"]["max_tilt_deg"], abs=1e-6)
     assert np.allclose(frictionless_rebound(np.array([3.0, 0.0, -2.8]), n, s * n, law.e), v_out)
-
-
-def test_short_juggle(cfg):
-    run = run_juggle(cfg, seed=1, max_bounces=8)
-    mt = juggle_metrics(run, cfg)
-    assert run.failure is None and mt["bounces"] >= 8
-    assert not mt["saturated"]
-    assert np.all(np.abs(mt["apex_err"][cfg["juggle"]["transient_bounces"]:]) < cfg["juggle"]["max_apex_err"])
