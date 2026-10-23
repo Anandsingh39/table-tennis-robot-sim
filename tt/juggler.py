@@ -21,7 +21,7 @@ import mujoco
 import numpy as np
 
 from tt.aero import AeroParams
-from tt.juggle_law import ImpactTargetingLaw
+from tt.juggle_law import ImpactTargetingLaw, make_law
 from tt.planner import JointTrajectory, Quintic, impact_joint_state, plan_stroke
 from tt.predictor import BallPredictor
 from tt.sim import Sim
@@ -54,7 +54,9 @@ class Juggler:
         self.h_slab = pc["blade_thickness"] / 2 + self.cfg["ball"]["radius"]
         self.z_impact = self.cfg["hit"]["center"][2] + self.h_slab     # ball centre height at impact
         self.predictor = BallPredictor(self.params, jc["predictor_dt"], jc["predictor_horizon"])
-        self.law = ImpactTargetingLaw.from_config(self.cfg, self.params, jc["predictor_dt"])
+        self.law = make_law(self.cfg, self.params, jc["predictor_dt"])
+        # the flight time T used by the run loop's time limit comes from the impact-targeting law
+        self.flight_time = ImpactTargetingLaw.from_config(self.cfg, self.params, jc["predictor_dt"]).T
         q = self.sim.q_ready
         z = np.zeros_like(q)
         self.traj = JointTrajectory([Quintic.fit(0.0, 1.0, q, z, z, q, z, z)])    # hold the ready pose
@@ -76,8 +78,10 @@ class Juggler:
             return
         n, s, v_out = self.law(pred.pos, pred.vel)
         c_star = pred.pos - self.h_slab * n
-        seed = self.sim.q_ready if self.q_star is None else self.q_star
-        q_star, qd_star, _ = impact_joint_state(self.sim.m, self.scratch, self.sim.ids, self.cfg, c_star, n, s * n, seed)
+        warm = self.q_star is not None
+        seed = self.q_star if warm else self.sim.q_ready
+        q_star, qd_star, _ = impact_joint_state(self.sim.m, self.scratch, self.sim.ids, self.cfg, c_star, n, s * n,
+                                                seed, warm=warm)
         t_hit = t + pred.t_rel
         q0, qd0, qdd0 = self.traj(t)
         self.traj = plan_stroke(t, q0, qd0, qdd0, t_hit, q_star, qd_star, pl["return_time"], self.sim.q_ready)

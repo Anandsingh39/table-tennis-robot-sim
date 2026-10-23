@@ -5,7 +5,7 @@ import pytest
 
 from tt.aero import AeroParams, rk4_rollout
 from tt.config import load_config
-from tt.juggle_law import ImpactTargetingLaw, frictionless_rebound, launch_speed_for_apex
+from tt.juggle_law import ImpactTargetingLaw, PDTiltLaw, frictionless_rebound, launch_speed_for_apex
 from tt.predictor import BallPredictor
 
 
@@ -46,3 +46,21 @@ def test_law_on_centre_is_vertical_and_tilt_saturates(cfg):
     n, s, v_out = law(c + [0.5, 0, 0], np.array([3.0, 0.0, -2.8]))
     assert np.degrees(np.arccos(n[2])) == pytest.approx(cfg["juggle"]["max_tilt_deg"], abs=1e-6)
     assert np.allclose(frictionless_rebound(np.array([3.0, 0.0, -2.8]), n, s * n, law.e), v_out)
+
+
+def test_pd_tilt_law_is_linearised_impact_targeting(cfg):
+    """With the derived gains the PD-tilt law matches the impact-targeting law for small offsets,
+    and its paddle speed always gives the apex-target vertical speed."""
+    import copy
+
+    c = copy.deepcopy(cfg)
+    c["juggle"]["pd_kp"] = c["juggle"]["pd_kd"] = None
+    p = AeroParams.from_config(c)
+    it, pd = ImpactTargetingLaw.from_config(c, p, 0.005), PDTiltLaw.from_config(c, p, 0.005)
+    centre = np.array([*it.center_xy, 1.0])
+    for off, v_in in (([0.01, -0.005, 0], [0.02, 0.01, -2.75]), ([0.0, 0.02, 0], [-0.03, 0.0, -2.7])):
+        n_i, _, vo_i = it(centre + off, np.array(v_in))
+        n_p, s_p, vo_p = pd(centre + off, np.array(v_in))
+        assert vo_p[2] == pytest.approx(it.v_z, abs=1e-9)
+        assert np.allclose(vo_p, frictionless_rebound(np.array(v_in), n_p, s_p * n_p, pd.e))
+        assert np.linalg.norm(vo_p[:2] - vo_i[:2]) < 2e-3                    # m/s, within ~0.1 % of |v_out|

@@ -77,10 +77,12 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
     max_bounces = max_bounces or jc["max_bounces"]
     sim = make_sim(cfg)
     m, d, ids = sim.m, sim.d, sim.ids
-    params = AeroParams.from_config(cfg)
-    aero = BallAero(m, ids, params)
-    contact = ContactModel(m, ids, aero, [paddle_surface(cfg, arm_paddle_state(ids)), table_surface(cfg, params)],
-                           cfg["contact"]["rewind_to_impact_time"])
+    mm = cfg["mismatch"]
+    params = AeroParams.from_config(cfg)                                                # nominal (robot's model)
+    params_true = AeroParams.from_config(cfg, drag_coefficient=mm["true_drag_coefficient"])   # simulated world
+    aero = BallAero(m, ids, params_true)
+    contact = ContactModel(m, ids, aero, [paddle_surface(cfg, arm_paddle_state(ids), mm["true_paddle_restitution"]),
+                                          table_surface(cfg, params_true)], cfg["contact"]["rewind_to_impact_time"])
     juggler = Juggler(sim, cfg, params)
     center = np.asarray(cfg["hit"]["center"], float)
 
@@ -93,7 +95,7 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
     if use_estimate:
         sensor = BallSensor(cfg, np.random.default_rng([seed, 1]))
         ekf = BallEKF(cfg, params, juggler.z_impact,
-                      expected_v_out=lambda: juggler.plans[-1].v_out if juggler.plans else None)
+                      expected_bounce=lambda: (juggler.plans[-1].t_hit, juggler.plans[-1].v_out) if juggler.plans else None)
 
     log = Logger()
     paddle_events: list = []
@@ -109,8 +111,8 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
             new = sensor.sample(t, p)
             if new is not None:
                 meas = new.z
-            for mm in sensor.delivered(t):
-                ekf.update(mm)
+            for msg in sensor.delivered(t):
+                ekf.update(msg)
             p_hat, v_hat = ekf.state_at(t) if ekf.initialised else (nan3, nan3)
             w_hat = np.zeros(3)                      # spin is not observed
         else:
@@ -139,7 +141,7 @@ def run_juggle(cfg: dict, seed: int, max_bounces: int | None = None, video=None,
             status["failure"] = "ball dropped"
         return status["failure"] is not None or len(paddle_events) > max_bounces
 
-    max_time = jc["drop_height"] + (max_bounces + 2) * (juggler.law.T + 0.1)
+    max_time = jc["drop_height"] + (max_bounces + 2) * (juggler.flight_time + 0.1)
     simulate(m, d, max_time, control, cfg=cfg, video=video, viewer=viewer, slowmo=slowmo,
              video_duration=video_duration)
     failure = status["failure"]

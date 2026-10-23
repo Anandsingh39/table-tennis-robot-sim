@@ -104,6 +104,9 @@ workspace_scan:
 
 planner:
   pinv_damping: 1.0e-3            # [assumed] damped pseudo-inverse for q_dot at impact (negligible away from singularities)
+  ik_refine_damping: 1.0e-3       # [assumed] damped Gauss-Newton IK refinement from the previous impact pose (juggler re-plans)
+  ik_refine_tol: 1.0e-9           # [assumed] residual |[p - p*, n - n*]| for convergence (~1 nm / 1e-9 rad)
+  ik_refine_max_iter: 20          # [assumed] then fall back to the full two-stage IK
   approach_time: 0.30             # s  [assumed] stroke start -> impact (tracking test)
   return_time: 0.50               # s  [assumed] impact -> back at rest in the ready pose (follow-through + return)
 
@@ -116,6 +119,12 @@ control:
   ct_kd: 60.0                     # [assumed] ... critically damped (Kd = 2 omega_n); omega_n dt = 0.03 << 1 at 1 kHz
   friction_ff: true               # [assumed] feed the model's dry joint friction (frictionloss) forward
   friction_smoothing: 0.01        # rad/s [assumed] tanh smoothing of sign(qd_d)
+
+mismatch:
+  # True physics of the simulated world when it differs from the nominal model the robot uses
+  # (predictor, juggling law, EKF always use aero.drag_coefficient / contact.paddle_restitution).
+  true_paddle_restitution: null   # null = same as contact.paddle_restitution  [plan Phase 7: ±0.1]
+  true_drag_coefficient: null     # null = same as aero.drag_coefficient       [plan Phase 7]
 
 sensing:
   # M4 sensor — THE measurement-noise specification of this project.
@@ -131,6 +140,8 @@ estimator:
   reset_vel_std: 0.3              # m/s [assumed] velocity std after a bounce, around the velocity the robot commanded
   bounce_nis_threshold: 16.27     # [std] chi^2(3) 99.9% quantile: innovation this unlikely = the ball was hit
   bounce_gate_height: 0.05        # m [assumed] bounces are only accepted with the ball within 5 cm above its impact height
+  bounce_time_margin: 0.002       # s [assumed] ... and no earlier than the planned impact time minus this (Phase 7 found false resets from noise outliers 3–15 ms before impact)
+  bounce_debounce: 0.05           # s [assumed] at most one detection per stroke
   min_pos_std: 0.0002             # m [assumed] floor on the measurement std used inside the filter (keeps S invertible at sigma = 0)
   settle_after_bounce: 0.10       # s [assumed] velocity RMSE "steady state" excludes this long after each detected bounce
   report_time_to_impact: 0.10     # s [plan Phase 6] report the impact-point prediction error at this time before impact
@@ -139,6 +150,9 @@ estimator:
 juggle:
   apex_height: 0.40               # m  [plan §4] apex of the ball centre above its impact height (~2.8 m/s impact speed)
   centering_gain: 0.5             # k_c [plan §6] 1 = deadbeat, ~0.5 = smoother
+  law: impact_targeting           # [plan §6] impact_targeting (main) | pd_tilt (comparison, Ji et al. 2024 style)
+  pd_kp: null                     # rad/m      PD-tilt gains; null = derived small-tilt equivalent of the
+  pd_kd: null                     # rad/(m/s)  impact-targeting law: Kp = k_c / (T dv_z), Kd = 1 / dv_z (tt/juggle_law.py)
   max_tilt_deg: 20.0              # deg [plan §6] paddle tilt limit
   drop_height: 0.60               # m  [plan Phase 5] initial ball centre height above its impact height (0.5–0.8 m)
   drop_xy_range: 0.05             # m  [plan Phase 5] initial horizontal offset ~ U(-0.05, 0.05) per axis
@@ -154,6 +168,28 @@ juggle:
   seed: 0                         # [plan §0.5] default seed for the initial offset
   max_apex_err: 0.01              # m  [plan Phase 5] steady-state apex height error
   max_lateral: 0.03               # m  [plan Phase 5] steady-state impact distance from the centre
+
+monte_carlo:
+  # Phase 7. Every condition runs the same seeds 0..n_seeds-1 (same initial offsets and noise streams: paired).
+  n_seeds: 50                     # [plan Phase 7]
+  workers: 22                     # [assumed] processes (server has 24 cores)
+  max_bounces: 200                # [plan Phase 7] cap
+  conditions:                     # overrides are "section.key: value" on top of this config
+    - {name: true state,      overrides: {sensing.ball_source: true}}
+    - {name: sigma 0 mm,      overrides: {sensing.pos_noise_std: 0.0}}
+    - {name: sigma 1 mm,      overrides: {sensing.pos_noise_std: 0.001}}
+    - {name: sigma 2 mm,      overrides: {}}                                  # baseline
+    - {name: sigma 5 mm,      overrides: {sensing.pos_noise_std: 0.005}}
+    - {name: sigma 10 mm,     overrides: {sensing.pos_noise_std: 0.010}}
+    - {name: latency 10 ms,   overrides: {sensing.latency: 0.010}}
+    - {name: lat 10 ms + 2% dropout, overrides: {sensing.latency: 0.010, sensing.dropout_prob: 0.02}}
+    - {name: true e_r 0.7,    overrides: {mismatch.true_paddle_restitution: 0.7}}
+    - {name: true e_r 0.9,    overrides: {mismatch.true_paddle_restitution: 0.9}}
+    - {name: true C_d 0.37,   overrides: {mismatch.true_drag_coefficient: 0.37}}
+    - {name: true C_d 0.57,   overrides: {mismatch.true_drag_coefficient: 0.57}}
+    - {name: PD-tilt law,     overrides: {juggle.law: pd_tilt}}
+    - {name: PD-tilt law sigma 10 mm, overrides: {juggle.law: pd_tilt, sensing.pos_noise_std: 0.010}}
+    - {name: PD-tilt law Kd 0, overrides: {juggle.law: pd_tilt, juggle.pd_kd: 0.0}}       # position-only tilt
 
 tracking:
   settle_time: 0.2                # s  [assumed] hold the ready pose before the stroke starts

@@ -200,10 +200,12 @@ def static_state(center, R=np.eye(3)) -> Callable[[mujoco.MjModel, mujoco.MjData
     return lambda m, d: st
 
 
-def paddle_surface(cfg: dict, state) -> Surface:
+def paddle_surface(cfg: dict, state, restitution: float | None = None) -> Surface:
+    """restitution overrides contact.paddle_restitution (used for the true-vs-nominal mismatch study)."""
     pc, cc = cfg["paddle"], cfg["contact"]
+    e = cc["paddle_restitution"] if restitution is None else restitution
     return Surface("paddle", pc["blade_thickness"] / 2, "disk", (pc["blade_radius"],), True,
-                   cc["paddle_restitution"], cc["paddle_friction"], state)
+                   e, cc["paddle_friction"], state)
 
 
 def table_surface(cfg: dict, aero_params: AeroParams) -> Surface:

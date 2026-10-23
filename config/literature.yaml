@@ -1,0 +1,27 @@
+# Reported juggling results from the reference papers, transcribed from the papers themselves
+# (not estimated). Used only for the replication table (scripts/make_figures.py).
+
+nakashima2008:
+  cite: "A. Nakashima, Y. Sugiyama, Y. Hayakawa, 'Paddle Juggling by Robot Manipulator with Visual Servo', in Robot Manipulators, InTech 2008, doi:10.5772/6218 (journal version of ICARCV 2006)"
+  robot: "DENSO 6-joint manipulator, joint J4 fixed (5 DOF used); torque-input via D/A (Sec. 2)"
+  paddle: "aluminium square plate 150 mm, 3 mm thick, 0.20 kg (Sec. 2)"
+  sensing: "2 CCD cameras + QuickMAG tracker, 120 Hz sampling (Sec. 2)"
+  ball_model: "no air resistance; isotropic restitution matrix at impact (Sec. 3.3, Assumptions 1-2); restitution values not stated"
+  control_law: "racket xy tracks the ball, z mirrors the ball about the hitting plane; racket tilt regulates the hitting point; energy-based gain for ball height (Sec. 5)"
+  duration: "one continuous 100 s run (Sec. 6, Fig. 12); number of hits not reported"
+  target: "hitting point [0.35, -0.65, 0.35] m (Sec. 6); apex target expressed through an energy threshold, 0.070 m (Sec. 6)"
+  position_error: "mean hitting-position error 1.4 cm (x) and 3.6 cm (y); most of the ball path inside a 5 cm-radius circle (Sec. 6, Fig. 12)"
+  height_error: "not reported numerically"
+  robustness: "juggling preserved when the ball was disturbed at random with a stick (Sec. 6, Fig. 13)"
+
+ji2024:
+  cite: "Y. Ji, B. Zhang, Y. Mao, H. Wang, X. Hu, L. Zhang, 'Design, Modeling, and Experimental Validation of a Vision-Based Table Tennis Juggling Robot', Mathematics 12(11):1634, 2024, doi:10.3390/math12111634"
+  robot: "3-DOF parallel mechanism with ball-joint end effector; servo motors 4 N·m rated / 12 N·m peak, gear ratio 7.75 (Sec. 6)"
+  paddle: "hexagonal aluminium juggling paddle (Sec. 6)"
+  sensing: "2 industrial cameras at 250 FPS, mounted 1 m above the robot (Secs. 1, 6)"
+  ball_model: "V_z,out = k V_z,in + b with k = -0.95, b = 0 (Eq. 13)"
+  control_law: "PD controller on the paddle tilt about X and Y driven by the ball's distance from the paddle centre, output limited; T-shaped velocity profile with stroke delta_z = 0.037 z_h (Sec. 5)"
+  duration: "experiment 1: 100 juggles per height; experiment 2: 30 s per height (Sec. 6)"
+  target: "bounce heights 10, 30, 50 cm above the paddle; target point = paddle centre (Sec. 6)"
+  position_error: "maximum landing errors 250, 2500, 6000 mm^2 at 10, 30, 50 cm (Sec. 6, Fig. 7; units as reported); dispersion grows with height"
+  height_error: "each juggle within 10% of the set height (Sec. 6, Figs. 9-10)"

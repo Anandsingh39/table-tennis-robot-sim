@@ -76,11 +76,17 @@ def estimator_metrics(run: JuggleRun, cfg: dict, tti_bins: np.ndarray) -> dict:
 
     det = np.array(run.detected_bounces or [])
     window = cfg["estimator"]["settle_after_bounce"]
+    # a detection can carry a time stamp up to one sample period before the (rewound, interpolated)
+    # impact time, so the matching window starts one sample period early
+    early = 1.0 / cfg["sensing"]["rate"]
     ev_obs = ev_t[ev_t + window <= t[-1]]          # impacts followed by a full detection window before the run ended
-    delays = np.array([det[(det >= te) & (det < te + window)].min() - te for te in ev_obs
-                       if np.any((det >= te) & (det < te + window))])
-    matched = sum(np.any((det >= te) & (det < te + window)) for te in ev_obs)
-    false = sum(not np.any((ev_t <= td) & (ev_t > td - window)) for td in det)
+
+    def hits(te):
+        return det[(det >= te - early) & (det < te + window)]
+
+    delays = np.array([hits(te).min() - te for te in ev_obs if hits(te).size])
+    matched = sum(hits(te).size > 0 for te in ev_obs)
+    false = sum(not np.any((ev_t <= td + early) & (ev_t > td - window)) for td in det)
     return dict(vel_rmse=np.sqrt(np.mean(dv ** 2, axis=0)), pos_rmse=np.sqrt(np.mean(dp ** 2, axis=0)),
                 vel_rmse_norm=float(np.sqrt(np.mean(np.sum(dv ** 2, axis=1)))),
                 tti_centers=centers, pred_err_median=med, pred_err_p90=p90, pred_time_err_median=tmed,

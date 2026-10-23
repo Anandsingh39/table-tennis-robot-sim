@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from tt.kinematics import solve_paddle_pose_cfg, task_jacobian
+from tt.kinematics import refine_paddle_pose, solve_paddle_pose_cfg, task_jacobian
 from tt.model import SceneIds
 
 
@@ -71,9 +71,19 @@ class JointTrajectory:
 
 
 def impact_joint_state(m: mujoco.MjModel, d_scratch: mujoco.MjData, ids: SceneIds, cfg: dict,
-                       p, n, v, q_seed):
-    """(q*, q̇*, info) achieving paddle centre p, normal n and centre velocity v (no tilt rate)."""
-    q, p_ik, n_ik = solve_paddle_pose_cfg(m, ids, cfg, p, n, q0=q_seed)
+                       p, n, v, q_seed, warm: bool = False):
+    """(q*, q̇*, info) achieving paddle centre p, normal n and centre velocity v (no tilt rate).
+
+    warm=True: q_seed is a nearby impact pose (previous plan) -> fast damped Gauss-Newton refinement,
+    falling back to the full two-stage IK if it does not converge.
+    """
+    pl = cfg["planner"]
+    ok = False
+    if warm:
+        q, p_ik, n_ik, ok = refine_paddle_pose(m, d_scratch, ids, p, n, q_seed, pl["ik_refine_damping"],
+                                               pl["ik_refine_tol"], pl["ik_refine_max_iter"])
+    if not ok:
+        q, p_ik, n_ik = solve_paddle_pose_cfg(m, ids, cfg, p, n, q0=q_seed)
     J = task_jacobian(m, d_scratch, ids, q)
     lam = cfg["planner"]["pinv_damping"]
     xdot = np.concatenate([np.asarray(v, float), np.zeros(2)])

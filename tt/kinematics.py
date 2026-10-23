@@ -72,6 +72,27 @@ def solve_paddle_pose(m: mujoco.MjModel, ids: SceneIds, p_target, n_target, q_no
     return x0, p, nn
 
 
+def refine_paddle_pose(m: mujoco.MjModel, d: mujoco.MjData, ids: SceneIds, p_target, n_target, q0,
+                       damping: float, tol: float, max_iter: int):
+    """Fast warm-started IK: damped Gauss-Newton on r = [p - p*, n - n*] from q0, joint limits by clipping.
+
+    q <- clip(q - J^T (J J^T + lambda^2 I)^-1 r). From a nearby solution (the previous impact pose)
+    it converges in a few iterations. Returns (q, p, n, converged).
+    """
+    p_t = np.asarray(p_target, float)
+    n_t = np.asarray(n_target, float) / np.linalg.norm(n_target)
+    q = np.clip(np.asarray(q0, float), ids.q_lo, ids.q_hi)
+    for _ in range(max_iter):
+        p, n, jp, jn = paddle_fk(m, d, ids, q)
+        r = np.concatenate([p - p_t, n - n_t])
+        if np.linalg.norm(r) < tol:
+            return q, p, n, True
+        J = np.vstack([jp, jn])
+        q = np.clip(q - J.T @ np.linalg.solve(J @ J.T + damping ** 2 * np.eye(6), r), ids.q_lo, ids.q_hi)
+    p, n, _, _ = paddle_fk(m, d, ids, q)
+    return q, p, n, np.linalg.norm(np.concatenate([p - p_t, n - n_t])) < tol
+
+
 def solve_paddle_pose_cfg(m: mujoco.MjModel, ids: SceneIds, cfg: dict, p_target, n_target, q0=None):
     """solve_paddle_pose with the IK weights/tolerance/posture prior from the config."""
     rp = cfg["ready_pose"]

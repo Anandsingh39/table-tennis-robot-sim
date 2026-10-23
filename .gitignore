@@ -10,3 +10,7 @@ MUJOCO_LOG.TXT
 !results/juggle_noisy.mp4
 !results/juggle_noisy.png
 !results/juggle_noisy_estimator.png
+!results/mc_*.png
+!results/mc_summary.md
+!results/mc_summary.csv
+!results/replication_table.md

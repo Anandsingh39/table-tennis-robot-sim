@@ -85,3 +85,50 @@ class ImpactTargetingLaw:
         v_out = self.v_out(p_star, v_in)
         n, s = paddle_command(v_in, v_out, self.e)
         return n, s, v_out
+
+
+@dataclass
+class PDTiltLaw:
+    """Comparison law (paddle-juggling papers, e.g. Ji et al. 2024 Sec. 5): PD on the paddle tilt.
+
+        tilt t = Kp (c - p*_xy) - Kd v_in,xy        (rad; capped at max_tilt),   n = (t_x, t_y, 1) / |.|
+        paddle speed along n chosen so the vertical outgoing speed is v_z (apex target):
+            v_out,z = v_in,z - (1 + e) (v_in . n - s) n_z = v_z   =>   s = v_in . n + (v_z - v_in,z) / ((1 + e) n_z)
+    For small tilts v_out,xy ~ v_in,xy + dv_z n_xy (dv_z = v_z - v_in,z), so the impact-targeting law is
+    this PD law with Kp = k_c / (T dv_z) and Kd = 1 / dv_z: the default gains (config null) are exactly
+    those, i.e. the PD law is the linearised mirror law with fixed gains.
+    """
+
+    e: float
+    center_xy: np.ndarray
+    v_z: float
+    kp: float               # rad / m
+    kd: float               # rad / (m/s)
+    max_tilt: float
+
+    @classmethod
+    def from_config(cls, cfg: dict, params: AeroParams, dt: float) -> "PDTiltLaw":
+        it = ImpactTargetingLaw.from_config(cfg, params, dt)
+        jc = cfg["juggle"]
+        g, k, h = -params.gravity[2], params.k_d, jc["apex_height"]
+        v_fall = np.sqrt(2 * g * h) if k == 0 else np.sqrt(g / k * -np.expm1(-2 * k * h))  # nominal |v_in,z|
+        dv_z = it.v_z + v_fall
+        kp = jc["pd_kp"] if jc.get("pd_kp") is not None else it.k_c / (it.T * dv_z)
+        kd = jc["pd_kd"] if jc.get("pd_kd") is not None else 1.0 / dv_z
+        return cls(e=it.e, center_xy=it.center_xy, v_z=it.v_z, kp=kp, kd=kd, max_tilt=it.max_tilt)
+
+    def __call__(self, p_star: np.ndarray, v_in: np.ndarray):
+        t = self.kp * (self.center_xy - p_star[:2]) - self.kd * v_in[:2]
+        mag = np.linalg.norm(t)
+        if mag > np.tan(self.max_tilt):
+            t *= np.tan(self.max_tilt) / mag
+        n = np.array([t[0], t[1], 1.0]) / np.sqrt(1.0 + t @ t)
+        s = float(v_in @ n + (self.v_z - v_in[2]) / ((1.0 + self.e) * n[2]))
+        v_out = frictionless_rebound(v_in, n, s * n, self.e)
+        return n, s, v_out
+
+
+def make_law(cfg: dict, params: AeroParams, dt: float):
+    """juggle.law: impact_targeting (default) | pd_tilt."""
+    law = cfg["juggle"].get("law", "impact_targeting")
+    return {"impact_targeting": ImpactTargetingLaw, "pd_tilt": PDTiltLaw}[law].from_config(cfg, params, dt)

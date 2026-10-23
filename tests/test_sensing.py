@@ -57,7 +57,7 @@ def test_ekf_detects_bounce_and_uses_commanded_velocity(cfg):
     p = AeroParams.from_config(cfg)
     sigma, dt = cfg["sensing"]["pos_noise_std"], 1.0 / cfg["sensing"]["rate"]
     v_out = np.array([0.0, 0.0, 2.9])
-    ekf = BallEKF(cfg, p, z_impact=1.0, expected_v_out=lambda: v_out)
+    ekf = BallEKF(cfg, p, z_impact=1.0, expected_bounce=lambda: (k_b * dt, v_out))
     rng = np.random.default_rng(4)
     # falling onto z = 1.0, bouncing at t_b with v_out, then rising
     x_down, v_down = rk4_rollout([0.4, 0, 1.3], [0, 0, 0], [0, 0, 0], p, dt, 1000)

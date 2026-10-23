@@ -14,11 +14,15 @@ The filter state lives at the time of the latest measurement it has processed; s
 propagates it (mean only) to the current time, which is how latency is handled.
 
 Bounce handling (no access to the simulator's contact flag): a paddle impact changes the velocity
-by ~5 m/s upward, so the first measurements after it land far ABOVE the prediction. If the
-normalised innovation squared  NIS = y^T S^-1 y  exceeds a chi^2(3) threshold, the innovation
-points up (y_z > 0) and the ball is near the impact height, the filter declares a bounce and
-re-initialises: p = measurement, v = the velocity the juggler commanded (if known, else 0),
-P = diag(sigma^2, reset_vel_std^2). Detection takes 1–2 samples (<= 10 ms at 200 Hz).
+by ~5 m/s upward, so the first measurements after it land far ABOVE the prediction. A bounce is
+declared when the normalised innovation squared  NIS = y^T S^-1 y  exceeds a chi^2(3) threshold,
+the innovation points up (y_z > 0), the ball is near the impact height AND the robot is actually
+swinging: the measurement is no earlier than the planned impact time minus a small margin (the
+robot knows when it hits; without this gate, ~3-sigma noise outliers in the last ~20 ms before
+impact caused false resets, wrong predictions and torque saturation). At most one detection per
+stroke (debounce). On a bounce the filter re-initialises: p = measurement,
+v = the velocity the juggler commanded, P = diag(sigma^2, reset_vel_std^2).
+Detection takes 1–2 samples (<= 10 ms at 200 Hz).
 """
 
 from __future__ import annotations
@@ -69,7 +73,8 @@ class BallSensor:
 
 class BallEKF:
     def __init__(self, cfg: dict, params: AeroParams, z_impact: float,
-                 expected_v_out: Callable[[], np.ndarray | None] | None = None):
+                 expected_bounce: Callable[[], tuple[float, np.ndarray] | None] | None = None):
+        """expected_bounce() -> (planned impact time, commanded v_out) of the robot's current stroke, or None."""
         ec = cfg["estimator"]
         self.p = params
         self.sigma = cfg["sensing"]["pos_noise_std"]
@@ -77,9 +82,11 @@ class BallEKF:
         self.init_vel_std = ec["init_vel_std"]
         self.reset_vel_std = ec["reset_vel_std"]
         self.nis_threshold = ec["bounce_nis_threshold"]
+        self.time_margin = ec["bounce_time_margin"]
+        self.debounce = ec["bounce_debounce"]
         self.gate_z = z_impact + ec["bounce_gate_height"]
         self.min_sigma = ec["min_pos_std"]
-        self.expected_v_out = expected_v_out
+        self.expected_bounce = expected_bounce
         self.x: np.ndarray | None = None
         self.P: np.ndarray | None = None
         self.t: float | None = None
@@ -129,9 +136,10 @@ class BallEKF:
         S = self.P[:3, :3] + self._R()
         nis = float(y @ np.linalg.solve(S, y))
         self.last_nis = nis
-        if nis > self.nis_threshold and y[2] > 0 and min(self.x[2], m.z[2]) < self.gate_z:
-            v_prior = self.expected_v_out() if self.expected_v_out else None
-            self._reset(m.t, m.z, np.zeros(3) if v_prior is None else np.asarray(v_prior, float),
+        if self._is_bounce(m, y, nis):
+            exp = self.expected_bounce() if self.expected_bounce else None
+            v_prior = None if exp is None else np.asarray(exp[1], float)
+            self._reset(m.t, m.z, np.zeros(3) if v_prior is None else v_prior,
                         self.init_vel_std if v_prior is None else self.reset_vel_std)
             self.bounces.append(m.t)
             return True
@@ -141,6 +149,17 @@ class BallEKF:
         IKH[:, :3] -= K
         self.P = IKH @ self.P @ IKH.T + K @ self._R() @ K.T
         return False
+
+    def _is_bounce(self, m: Measurement, y: np.ndarray, nis: float) -> bool:
+        """Bounce test: large upward innovation near the impact height, at a time the robot is actually hitting."""
+        if y[2] <= 0 or min(self.x[2], m.z[2]) >= self.gate_z:
+            return False
+        if self.bounces and m.t - self.bounces[-1] < self.debounce:
+            return False
+        exp = self.expected_bounce() if self.expected_bounce else None
+        if exp is not None and m.t < exp[0] - self.time_margin:   # the paddle is not there yet: an outlier, not a hit
+            return False
+        return nis > self.nis_threshold
 
     def state_at(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         """Estimated (position, velocity) at time t >= filter time (mean propagated by the flight model)."""

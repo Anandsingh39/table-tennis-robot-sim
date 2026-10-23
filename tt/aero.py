@@ -49,9 +49,17 @@ class AeroParams:
                    k_d=rho * cd * area / (2 * m), k_m=rho * cm * area * r / (2 * m))
 
 
+def cross3(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """3-vector cross product (np.cross is ~10x slower for single vectors; this is a hot path)."""
+    return np.array([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
+
+
 def aero_accel(v: np.ndarray, w: np.ndarray, p: AeroParams) -> np.ndarray:
     """Aerodynamic acceleration only (no gravity)."""
-    return -p.k_d * np.linalg.norm(v) * v + p.k_m * np.cross(w, v)
+    a = -p.k_d * np.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) * v
+    if p.k_m != 0.0:
+        a = a + p.k_m * cross3(w, v)
+    return a
 
 
 def total_accel(v: np.ndarray, w: np.ndarray, p: AeroParams) -> np.ndarray:
