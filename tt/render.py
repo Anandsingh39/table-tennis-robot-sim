@@ -73,15 +73,17 @@ class VideoRecorder:
 
 
 def simulate(m: mujoco.MjModel, d: mujoco.MjData, duration: float,
-             control: Callable[[mujoco.MjModel, mujoco.MjData], None],
+             control: Callable[[mujoco.MjModel, mujoco.MjData], bool | None],
              pre_step: Callable[[mujoco.MjModel, mujoco.MjData], None] | None = None,
              post_step: Callable[[mujoco.MjModel, mujoco.MjData], None] | None = None,
              cfg: dict | None = None, video: str | Path | None = None, viewer: bool = False,
-             slowmo: float = 1.0) -> None:
+             slowmo: float = 1.0, video_duration: float | None = None) -> None:
     """Run the physics loop: pre_step (state edits) -> mj_step1 -> control (sets ctrl) -> mj_step2 -> post_step.
 
     mj_step1 computes all position/velocity-dependent quantities (incl. qfrc_bias) for the
     current state, so the controller sees a consistent state; mj_step2 integrates.
+    If control returns True the run stops after that step (e.g. juggling finished or failed).
+    The video, if any, stops after `video_duration` seconds of sim time (None = whole run).
     """
     rec = VideoRecorder(m, cfg, video, slowmo) if video else None
     view = None
@@ -104,12 +106,14 @@ def simulate(m: mujoco.MjModel, d: mujoco.MjData, duration: float,
             if pre_step:
                 pre_step(m, d)
             mujoco.mj_step1(m, d)
-            control(m, d)
+            stop = control(m, d)
             mujoco.mj_step2(m, d)
             if post_step:
                 post_step(m, d)
-            if rec:
+            if rec and (video_duration is None or d.time <= video_duration):
                 rec.maybe_capture(d)
+            if stop:
+                break
             if view is not None:
                 view.sync()
                 lag = (d.time - sim0) * slowmo - (time.perf_counter() - wall0)

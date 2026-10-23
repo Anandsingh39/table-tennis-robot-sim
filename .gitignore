@@ -5,3 +5,5 @@ __pycache__/
 results/*
 !results/model_report.md
 MUJOCO_LOG.TXT
+!results/juggle_nominal.mp4
+!results/juggle_nominal.png

@@ -117,6 +117,25 @@ control:
   friction_ff: true               # [assumed] feed the model's dry joint friction (frictionloss) forward
   friction_smoothing: 0.01        # rad/s [assumed] tanh smoothing of sign(qd_d)
 
+juggle:
+  apex_height: 0.40               # m  [plan §4] apex of the ball centre above its impact height (~2.8 m/s impact speed)
+  centering_gain: 0.5             # k_c [plan §6] 1 = deadbeat, ~0.5 = smoother
+  max_tilt_deg: 20.0              # deg [plan §6] paddle tilt limit
+  drop_height: 0.60               # m  [plan Phase 5] initial ball centre height above its impact height (0.5–0.8 m)
+  drop_xy_range: 0.05             # m  [plan Phase 5] initial horizontal offset ~ U(-0.05, 0.05) per axis
+  max_bounces: 200                # [plan Phase 5]
+  planner_period: 0.01            # s  [plan §4] re-plan at 100 Hz
+  plan_horizon: 0.35              # s  [assumed] start planning the stroke when the predicted impact is this close
+  freeze_time: 0.04               # s  [plan Phase 5] stop re-planning 30–50 ms before impact
+  predictor_dt: 0.005             # s  [assumed] RK4 step of the predictor (error ~ dt^4, negligible)
+  predictor_horizon: 2.0          # s  [assumed] longest flight the predictor looks for
+  fail_drop: 0.10                 # m  [assumed] ball centre this far below its impact height = dropped
+  fail_radius: 0.15               # m  [assumed] ball impact this far (horizontally) from the centre = lost
+  transient_bounces: 5            # [assumed] bounces excluded from steady-state metrics (initial drop offset decays)
+  seed: 0                         # [plan §0.5] default seed for the initial offset
+  max_apex_err: 0.01              # m  [plan Phase 5] steady-state apex height error
+  max_lateral: 0.03               # m  [plan Phase 5] steady-state impact distance from the centre
+
 tracking:
   settle_time: 0.2                # s  [assumed] hold the ready pose before the stroke starts
   # Strokes for scripts/tracking_test.py: impact at hit.center + offset with the paddle normal tilted

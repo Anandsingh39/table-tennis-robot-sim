@@ -58,25 +58,30 @@ def total_accel(v: np.ndarray, w: np.ndarray, p: AeroParams) -> np.ndarray:
     return p.gravity + aero_accel(v, w, p)
 
 
+def rk4_step(y: np.ndarray, w: np.ndarray, p: AeroParams, dt: float) -> np.ndarray:
+    """One classic RK4 step of y = [x, v] under gravity + drag + Magnus (constant world spin w)."""
+
+    def f(y):
+        return np.concatenate([y[3:], total_accel(y[3:], w, p)])
+
+    k1 = f(y)
+    k2 = f(y + 0.5 * dt * k1)
+    k3 = f(y + 0.5 * dt * k2)
+    k4 = f(y + dt * k3)
+    return y + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+
+
 def rk4_rollout(pos0, vel0, spin, p: AeroParams, dt: float, n: int) -> tuple[np.ndarray, np.ndarray]:
     """Independent reference / predictor: classic RK4 on y = [x, v], constant world spin.
 
     Returns (pos, vel) arrays of shape (n+1, 3) at t = 0, dt, ..., n dt.
     """
     w = np.asarray(spin, float)
-
-    def f(y):
-        return np.concatenate([y[3:], total_accel(y[3:], w, p)])
-
     y = np.concatenate([pos0, vel0]).astype(float)
     out = np.empty((n + 1, 6))
     out[0] = y
     for i in range(n):
-        k1 = f(y)
-        k2 = f(y + 0.5 * dt * k1)
-        k3 = f(y + 0.5 * dt * k2)
-        k4 = f(y + dt * k3)
-        y = y + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        y = rk4_step(y, w, p, dt)
         out[i + 1] = y
     return out[:, :3], out[:, 3:]
 
