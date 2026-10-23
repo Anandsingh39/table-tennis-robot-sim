@@ -4,7 +4,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from tt.config import load_config
+from tt.config import load_config, ready_paddle_pos
 from tt.control import gravity_comp_pd
 from tt.kinematics import paddle_fk, paddle_pose, ready_pose
 from tt.model import build_model
@@ -66,7 +66,7 @@ def test_ready_pose_reaches_target(scene):
     q, p, n = ready_pose(m, ids, cfg)
     ck, rp = cfg["checks"], cfg["ready_pose"]
     assert np.all(q > ids.q_lo) and np.all(q < ids.q_hi)
-    assert np.linalg.norm(p - rp["paddle_pos"]) < ck["ready_pose_pos_tol"]
+    assert np.linalg.norm(p - ready_paddle_pos(cfg)) < ck["ready_pose_pos_tol"]
     assert np.rad2deg(np.arccos(np.clip(n @ rp["paddle_normal"], -1, 1))) < ck["ready_pose_normal_tol_deg"]
 
 

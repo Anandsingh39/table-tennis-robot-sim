@@ -8,7 +8,7 @@
 physics:
   timestep: 0.001                 # s  [plan §4] 1 kHz physics
   gravity: [0.0, 0.0, -9.81]      # m/s^2  [std]
-  integrator: implicitfast        # [assumed] MuJoCo's recommended integrator; joint damping treated implicitly. Revisit in Phase 2 (ballistic accuracy)
+  integrator: implicitfast        # [assumed] MuJoCo's recommended integrator; joint damping treated implicitly. Semi-implicit for the ball: see tt/aero.py half-step handling (Phase 2)
 
 robot:
   # Where the OpenArm v2 `arm_origin` site (the bimanual model root) is placed in the world.
@@ -71,27 +71,65 @@ table:
   top_height: 0.76                # m  [ITTF]
   thickness: 0.03                 # m  [assumed] visual
   leg_half_width: 0.03            # m  [assumed] visual
-  near_edge_x: 0.55               # m  [assumed] robot stands behind its end line; the ready-pose paddle (x≈0.41) is just outside it
+  near_edge_x: 0.65               # m  [assumed] robot behind its end line: the paddle at the hit centre (x = 0.475 ± 0.075) stays outside the table
   net_height: 0.1525              # m  [ITTF]
   net_overhang: 0.1525            # m  [ITTF] net extends 15.25 cm beyond each side line
 
+hit:
+  # Centre of the hit plane (paddle centre at impact for a ball on target), z = hit-plane height z_h.
+  center: [0.475, 0.0, 1.00]      # m  [measured in sim] scripts/workspace_scan.py: max manipulability among points reachable with ±20° tilts and >= 0.10 rad joint margin
+
 ready_pose:
   # The ready pose is solved by IK (tt/kinematics.py) from these targets, not hard-coded.
-  paddle_pos: [0.41, 0.0, 0.98]   # m  [assumed] provisional; Phase 4 picks the final hit-plane height z_h
+  offset_from_hit_center: [0.0, 0.0, -0.08]   # m [assumed] paddle waits 8 cm below the hit plane, so strokes accelerate upward into the ball
   paddle_normal: [0.0, 0.0, 1.0]  # [plan] paddle horizontal, facing up
-  q_nominal: [0.0, 0.25, 0.0, 1.5708, 0.0, 0.0, 0.0]  # rad [assumed] posture prior: elbow 90°, shoulder abducted 0.25 rad away from joint2's -0.17 rad limit
+  q_nominal: [0.0, 0.5, 0.0, 1.5708, 0.0, 0.0, 0.0]   # rad [assumed] posture prior: elbow 90°, shoulder abducted 0.5 rad (joint2 limit is -0.17 rad; 0.5 gave the most joint margin in the Phase 4 scan)
   ik_weight_pos: 1.0              # [assumed] residual weight on paddle position (m)
   ik_weight_normal: 1.0           # [assumed] residual weight on paddle normal (unit vector)
   ik_weight_posture: 0.01         # [assumed] residual weight pulling q toward q_nominal (rad)
   ik_tol: 1.0e-12                 # [assumed] least-squares tolerance (ftol/xtol/gtol)
+  ik_refine_posture_ratio: 1.0e-4 # [assumed] stage-2 posture weight = ik_weight_posture * this (task met exactly)
+
+workspace_scan:
+  # Phase 4 search for the hit-plane centre (scripts/workspace_scan.py).
+  x_range: [0.20, 0.60]           # m  [assumed] in front of the shoulder
+  z_range: [0.80, 1.35]           # m  [assumed] around shoulder height (1.20 m)
+  step: 0.025                     # m  [assumed]
+  y: 0.0                          # m  [assumed] table centre line
+  max_tilt_deg: 20.0              # deg [plan §6] paddle tilt the juggling law may command
+  min_joint_margin: 0.10          # rad [assumed] every joint >= 5.7° from its limits for all tilts and the ready pose (0.15 rad left no feasible point: wrist pitch joint6 is only ±45°)
+  ball_column_clearance: 0.12     # m  [assumed] arm link origins above the hit plane must be this far (horizontally) from the ball's vertical path
+  ik_tol_pos: 0.001               # m  [assumed] IK counted as reached within 1 mm ...
+  ik_tol_normal_deg: 0.5          # deg [assumed] ... and 0.5 deg
+
+planner:
+  pinv_damping: 1.0e-3            # [assumed] damped pseudo-inverse for q_dot at impact (negligible away from singularities)
+  approach_time: 0.30             # s  [assumed] stroke start -> impact (tracking test)
+  return_time: 0.50               # s  [assumed] impact -> back at rest in the ready pose (follow-through + return)
 
 control:
   # Phase 1 hold controller: tau = qfrc_bias(q, qdot) + Kp (q_d - q) - Kd qdot
   hold_kp: [100.0, 100.0, 60.0, 60.0, 20.0, 20.0, 20.0]   # N·m/rad [assumed]
   hold_kd: [5.0, 5.0, 3.0, 3.0, 1.0, 1.0, 1.0]            # N·m·s/rad [assumed]
+  # Computed torque: closed-loop e_dd + Kd e_d + Kp e = 0 per joint (units 1/s^2, 1/s).
+  ct_kp: 900.0                    # [assumed] omega_n = 30 rad/s ...
+  ct_kd: 60.0                     # [assumed] ... critically damped (Kd = 2 omega_n); omega_n dt = 0.03 << 1 at 1 kHz
+  friction_ff: true               # [assumed] feed the model's dry joint friction (frictionloss) forward
+  friction_smoothing: 0.01        # rad/s [assumed] tanh smoothing of sign(qd_d)
+
+tracking:
+  settle_time: 0.2                # s  [assumed] hold the ready pose before the stroke starts
+  # Strokes for scripts/tracking_test.py: impact at hit.center + offset with the paddle normal tilted
+  # by tilt_deg (about world x then y) and the paddle centre moving along the normal at `speed`.
+  strokes:
+    - {name: vertical 1.0 m/s,       offset: [0.0, 0.0, 0.0],    tilt_deg: [0.0, 0.0],    speed: 1.0}   # [plan Phase 4]
+    - {name: tilted 15 deg 0.6 m/s,  offset: [-0.03, 0.03, 0.0], tilt_deg: [10.0, -11.0], speed: 0.6}  # [assumed] juggling-like
+  max_pos_err: 0.002              # m   [plan Phase 4] paddle position error at impact
+  max_normal_err_deg: 1.0         # deg [plan Phase 4]
+  max_timing_err: 0.002           # s   [plan Phase 4] plane-crossing time vs commanded impact time
 
 checks:
-  hold_duration: 2.0              # s  [plan Phase 1]
+  hold_duration: 2.0             # s  [plan Phase 1]
   hold_max_drift: 0.001           # m  [plan Phase 1] paddle drift < 1 mm
   ready_pose_pos_tol: 0.001       # m  [assumed] IK must reach the ready paddle position to within 1 mm
   ready_pose_normal_tol_deg: 0.5  # deg [assumed] and the paddle normal to within 0.5 deg
@@ -129,7 +167,7 @@ render:
   height: 720                     # px
   fps: 60                         # [plan §0.7] 30–60 fps
   # Free camera framing the paddle and the ball apex (~0.6 m above the paddle).
-  lookat: [0.35, 0.0, 1.15]       # m
-  distance: 2.2                   # m
+  lookat: [0.38, 0.0, 1.15]       # m
+  distance: 1.4                   # m
   azimuth: 135.0                  # deg
-  elevation: -15.0                # deg
+  elevation: -10.0                # deg

@@ -23,7 +23,7 @@ import mujoco
 import numpy as np
 from openarm_mujoco import v2 as openarm
 
-from tt.config import REPO
+from tt.config import REPO, ready_paddle_pos
 
 SCENE_XML = REPO / "assets" / "scene.xml"
 
@@ -123,7 +123,7 @@ def _add_prescribed_paddle(spec: mujoco.MjSpec, cfg: dict) -> None:
 
 def _add_ball(spec: mujoco.MjSpec, cfg: dict) -> None:
     bc = cfg["ball"]
-    pos = np.array(cfg["ready_pose"]["paddle_pos"]) + [0, 0, bc["init_offset_above_paddle"]]
+    pos = ready_paddle_pos(cfg) + [0, 0, bc["init_offset_above_paddle"]]
     ball = spec.worldbody.add_body(name=BALL_BODY, pos=pos)
     ball.add_freejoint(name=BALL_JOINT)
     ball.add_geom(

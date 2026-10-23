@@ -22,7 +22,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tt.config import RESULTS, load_config  # noqa: E402
+from tt.config import RESULTS, load_config, ready_paddle_pos  # noqa: E402
 from tt.control import gravity_comp_pd  # noqa: E402
 from tt.kinematics import paddle_pose  # noqa: E402
 from tt.log_utils import Logger  # noqa: E402
@@ -121,7 +121,7 @@ def main() -> None:
     g = gravity_usage(m, ids, q_ready)
     ck = cfg["checks"]
     rp = cfg["ready_pose"]
-    ik_pos_err = np.linalg.norm(p0 - rp["paddle_pos"])
+    ik_pos_err = np.linalg.norm(p0 - ready_paddle_pos(cfg))
     ik_n_err = np.rad2deg(np.arccos(np.clip(n0 @ np.array(rp["paddle_normal"]), -1, 1)))
 
     print(f"model: nq={m.nq} nv={m.nv} nu={m.nu}  paddle mass={m.body_subtreemass[ids.paddle_body]:.3f} kg  "
