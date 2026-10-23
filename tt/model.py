@@ -35,6 +35,8 @@ BALL_GEOM = "ball_geom"
 TABLE_TOP_GEOM = "table_top"
 PRESCRIBED_BODY = "paddle_prescribed"
 PRESCRIBED_SITE = "paddle_prescribed_center"
+RAIL_BODY = "rail_carriage"
+RAIL_JOINT = "rail_slide"
 NO_CONTACT = dict(contype=0, conaffinity=0)
 
 
@@ -163,6 +165,42 @@ def _add_table(spec: mujoco.MjSpec, cfg: dict) -> None:
                        material="stand", **NO_CONTACT)
 
 
+def _mount_arm(scene: mujoco.MjSpec, cfg: dict, prefix: str, base: np.ndarray, quat) -> None:
+    """Stand + arm + motors + paddle. With robot.rail.enabled the stand sits on a carriage with a motorised
+    slide joint along the end line (the carriage's local y axis): a model modification for the rally (E2+)."""
+    rc = cfg["robot"]
+    hw = rc["stand_half_width"]
+    rail = rc.get("rail", {})
+    if rail.get("enabled", False):
+        carriage = scene.worldbody.add_body(name=prefix + RAIL_BODY, pos=[base[0], base[1], 0.0], quat=quat)
+        carriage.explicitinertial = True
+        carriage.mass = rail["carriage_mass"]
+        carriage.ipos = [0.0, 0.0, base[2] / 2]
+        carriage.inertia = [rail["carriage_mass"] * base[2] ** 2 / 12] * 2 + [rail["carriage_mass"] * (2 * hw) ** 2 / 6]
+        carriage.add_joint(name=prefix + RAIL_JOINT, type=mujoco.mjtJoint.mjJNT_SLIDE, axis=[0, 1, 0],
+                           range=[-rail["half_travel"], rail["half_travel"]], damping=rail["damping"],
+                           limited=mujoco.mjtLimited.mjLIMITED_TRUE)
+        carriage.add_geom(name=prefix + "stand", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hw, hw, base[2] / 2],
+                          pos=[0, 0, base[2] / 2], material="stand", **NO_CONTACT)
+        rail_len = rail["half_travel"] + 2 * hw
+        scene.worldbody.add_geom(name=prefix + "rail_track", type=mujoco.mjtGeom.mjGEOM_BOX,
+                                 size=[0.05, rail_len, 0.01], pos=[base[0], base[1], 0.01], quat=quat,
+                                 material="handle_wood", **NO_CONTACT)
+        frame = carriage.add_frame(pos=[0.0, 0.0, base[2]])
+        act = scene.add_actuator(name=prefix + RAIL_JOINT + "_motor", target=prefix + RAIL_JOINT,
+                                 trntype=mujoco.mjtTrn.mjTRN_JOINT)
+        act.set_to_motor()
+        act.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
+        act.ctrlrange = [-rail["max_force"], rail["max_force"]]
+    else:
+        scene.worldbody.add_geom(name=prefix + "stand", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hw, hw, base[2] / 2],
+                                 pos=[base[0], base[1], base[2] / 2], material="stand", **NO_CONTACT)
+        frame = scene.worldbody.add_frame(pos=base, quat=quat)
+    scene.attach(_arm_spec(cfg), prefix=prefix, frame=frame)
+    _add_motors(scene, cfg, prefix)
+    _add_paddle(scene, cfg, prefix)
+
+
 def build_spec(cfg: dict, prescribed_paddle: bool = False) -> mujoco.MjSpec:
     pc = cfg["physics"]
     scene = mujoco.MjSpec.from_file(str(SCENE_XML))
@@ -171,25 +209,12 @@ def build_spec(cfg: dict, prescribed_paddle: bool = False) -> mujoco.MjSpec:
     scene.option.integrator = getattr(mujoco.mjtIntegrator, f"mjINT_{pc['integrator'].upper()}")
 
     base = np.array(cfg["robot"]["base_pos"], dtype=float)
-    hw = cfg["robot"]["stand_half_width"]
-    scene.worldbody.add_geom(name="stand", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hw, hw, base[2] / 2],
-                             pos=[base[0], base[1], base[2] / 2], material="stand", **NO_CONTACT)
-    frame = scene.worldbody.add_frame(pos=base)
-    scene.attach(_arm_spec(cfg), prefix="", frame=frame)
-    _add_motors(scene, cfg)
-    _add_paddle(scene, cfg)
-
+    _mount_arm(scene, cfg, "", base, [1.0, 0.0, 0.0, 0.0])
     oc = cfg.get("opponent", {})
     if oc.get("enabled", False):
         # second arm at the far end: the first arm rotated 180 deg about the vertical axis through the net centre
         x_mid = cfg["table"]["near_edge_x"] + cfg["table"]["length"] / 2
-        base_o = mirror_point(base, x_mid)
-        scene.worldbody.add_geom(name=oc["prefix"] + "stand", type=mujoco.mjtGeom.mjGEOM_BOX, size=[hw, hw, base[2] / 2],
-                                 pos=[base_o[0], base_o[1], base[2] / 2], material="stand", **NO_CONTACT)
-        frame_o = scene.worldbody.add_frame(pos=base_o, quat=[0.0, 0.0, 0.0, 1.0])
-        scene.attach(_arm_spec(cfg), prefix=oc["prefix"], frame=frame_o)
-        _add_motors(scene, cfg, oc["prefix"])
-        _add_paddle(scene, cfg, oc["prefix"])
+        _mount_arm(scene, cfg, oc["prefix"], mirror_point(base, x_mid), [0.0, 0.0, 0.0, 1.0])
     _add_ball(scene, cfg)
     _add_table(scene, cfg)
     if prescribed_paddle:
@@ -212,6 +237,8 @@ def scene_ids(m: mujoco.MjModel, cfg: dict, prefix: str = "") -> SceneIds:
     """Ids for the arm whose element names start with prefix ("" = near arm, opponent.prefix = far arm)."""
     rc = cfg["robot"]
     names = tuple(f"{prefix}{rc['arm_prefix']}joint{i}" for i in range(1, rc["n_joints"] + 1))
+    if rc.get("rail", {}).get("enabled", False):
+        names = (prefix + RAIL_JOINT,) + names        # the rail slide is controlled like a 0th arm joint
     jid = [m.joint(n).id for n in names]
     act = np.array([m.actuator(f"{n}_motor").id for n in names])
     ball_j = m.joint(BALL_JOINT).id

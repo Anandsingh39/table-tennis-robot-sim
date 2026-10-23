@@ -41,6 +41,9 @@ def rally(args):
     st = np.concatenate([np.asarray(v, float) for v in r.solve_times.values()])
     L = r.logs
     return dict(seed=seed, hits=len(r.hits), fault=r.fault, by=r.fault_by, wall=time.time() - t0,
+                hit_y=[e.pos[1] for _, e in r.hits],
+                rail_range=[float(L[f"q_{k}"][:, 0].min()) for k in "AB"] + [float(L[f"q_{k}"][:, 0].max()) for k in "AB"]
+                if cfg["robot"].get("rail", {}).get("enabled", False) else None,
                 sim_time=float(L["t"][-1]),
                 bounce_dists=[abs(b.pos[0] - x_mid) for b in r.bounces],
                 hit_z=[e.pos[2] for _, e in r.hits], solve_times=st,
@@ -62,6 +65,7 @@ def main() -> None:
     ap.add_argument("--video-hits", type=int, default=12)
     ap.add_argument("--slowmo", type=float, default=1.0)
     ap.add_argument("--skip-stats", action="store_true", help="only render the video")
+    ap.add_argument("--tag", default="e2", help="output names results/<tag>_summary.md, <tag>_rally.png")
     args = ap.parse_args()
     cfg = load_config(args.config)
     ec = cfg["e2"]
@@ -87,6 +91,10 @@ def main() -> None:
             ("total hits simulated", int(hits.sum())),
             ("bounce distance past the net: mean ± std [m]", f"{bd.mean():.3f} ± {bd.std():.3f}"),
             ("ball height at impact: mean ± std [m]", f"{hz.mean():.3f} ± {hz.std():.3f}"),
+            ("lateral hit position y: min / max / std [m]", "{:.2f} / {:.2f} / {:.2f}".format(
+                *(lambda y: (y.min(), y.max(), y.std()))(np.concatenate([r["hit_y"] for r in runs])))),
+            ("rail travel used: min / max [m]", "–" if runs[0]["rail_range"] is None else
+             f"{min(min(r['rail_range'][:2]) for r in runs):.2f} / {max(max(r['rail_range'][2:]) for r in runs):.2f}"),
             ("paddle normal vs nominal: median / max [deg]", f"{np.median(np.concatenate([r['tilts'] for r in runs])):.1f} / {np.max(np.concatenate([r['tilts'] for r in runs])):.1f}"),
             ("paddle normal speed: median [m/s]", f"{np.median(np.concatenate([r['speeds'] for r in runs])):.2f}"),
             ("MPC solve time: median / p95 / max [ms]", f"{1e3 * np.median(st):.0f} / {1e3 * np.percentile(st, 95):.0f} / {1e3 * st.max():.0f}"),
@@ -95,13 +103,13 @@ def main() -> None:
             ("min joint-limit margin [rad]", f"{min(r['min_margin'] for r in runs):.3f}"),
             ("simulated time / wall time per rally (mean) [s]", f"{np.mean([r['sim_time'] for r in runs]):.1f} / {np.mean([r['wall'] for r in runs]):.0f}"),
         ]
-        md = ["# E2: two-robot cooperative rally", "",
-              "Config: config/rally2.yaml (two OpenArms, pre-tilted paddle mounts, cooperative lob shots, MPC swings, "
+        md = [f"# {args.tag}: two-robot cooperative rally", "",
+              f"Config: {args.config.resolve().relative_to(REPO)} (two OpenArms, pre-tilted paddle mounts, cooperative lob shots, MPC swings, "
               "true ball state). Serve: launcher ball to robot A. Legal hit = after exactly one bounce on the receiver's half.", "",
               "| metric | value |", "|---|---|"] + [f"| {a} | {b} |" for a, b in rows]
-        (RESULTS / "e2_summary.md").write_text("\n".join(md) + "\n")
+        (RESULTS / f"{args.tag}_summary.md").write_text("\n".join(md) + "\n")
         print("\n".join(md))
-        plot(runs, cap, RESULTS / "e2_rally.png")
+        plot(runs, cap, RESULTS / f"{args.tag}_rally.png")
     if args.video:
         from tt.rally2 import run_rally
 

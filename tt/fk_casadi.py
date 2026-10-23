@@ -3,6 +3,7 @@
 MuJoCo's kinematics for a chain of bodies with hinge joints:
     R_b = R_parent · R(quat_b) · Rot(axis_b, q_b),
     p_b = p_parent + R_parent · pos_b + (R_parent R(quat_b)) · a_b - R_b · a_b    (a_b = joint anchor in the body frame)
+a slide joint (the rally rail) translates the body along its axis instead: p_b += (R_parent R(quat_b)) · axis_b q_b,
 and the site: p_s = p_b + R_b · pos_s, R_s = R_b · R(quat_s). Rot(axis, q) is Rodrigues' formula.
 All constants (pos_b, quat_b, axis_b, a_b, site offsets) are read from the MjModel, so the
 symbolic model is exactly MuJoCo's (unit-tested against mj_kinematics).
@@ -52,9 +53,12 @@ class PaddleFK:
             p = p + R @ ca.DM(m.body_pos[b])
             R = R_fixed
             for j in range(m.body_jntadr[b], m.body_jntadr[b] + m.body_jntnum[b]):
-                if m.jnt_type[j] != mujoco.mjtJoint.mjJNT_HINGE:
-                    raise ValueError("only hinge joints are supported")
                 qi = q[arm_joints.index(j)]
+                if m.jnt_type[j] == mujoco.mjtJoint.mjJNT_SLIDE:      # rail: translate along the axis
+                    p = p + R_fixed @ ca.DM(m.jnt_axis[j]) * qi
+                    continue
+                if m.jnt_type[j] != mujoco.mjtJoint.mjJNT_HINGE:
+                    raise ValueError("only hinge and slide joints are supported")
                 a = ca.DM(m.jnt_pos[j])
                 R_new = R_fixed @ _axis_rot(m.jnt_axis[j], qi)
                 p = p + R_fixed @ a - R_new @ a          # rotate about the anchor

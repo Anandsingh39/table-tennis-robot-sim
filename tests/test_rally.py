@@ -82,3 +82,25 @@ def test_two_robot_rally_short():
     assert r.fault == "max hits" and len(r.hits) == 4
     assert [who for who, _ in r.hits] == ["A", "B", "A", "B"]
     assert not (r.logs["sat_A"].any() or r.logs["sat_B"].any())
+
+
+def test_rail_kinematics_and_short_rally():
+    """E2 + rail: slide joint in the symbolic FK; a short rally with lateral targets completes."""
+    from tt.config import REPO
+    from tt.fk_casadi import PaddleFK
+    from tt.model import build_model, scene_ids
+    from tt.rally2 import run_rally
+
+    cfg3 = load_config(REPO / "config" / "rally_rail.yaml")
+    m, ids = build_model(cfg3)
+    ido = scene_ids(m, cfg3, cfg3["opponent"]["prefix"])
+    assert ids.joint_names[0] == "rail_slide" and len(ids.arm_qpos) == 8
+    d = mujoco.MjData(m)
+    rng = np.random.default_rng(0)
+    for idx in (ids, ido):
+        fk = PaddleFK(m, idx.paddle_site, idx.arm_qpos)
+        q = rng.uniform(idx.q_lo, idx.q_hi)
+        p, _, _, _ = paddle_fk(m, d, idx, q)
+        assert np.allclose(np.array(fk.pos(q)).ravel(), p, atol=1e-9)
+    r = run_rally(cfg3, seed=2, max_hits=3)
+    assert r.fault == "max hits" and len(r.hits) == 3

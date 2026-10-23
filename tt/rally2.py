@@ -62,6 +62,7 @@ class RallyPlayer:
     x_plane: float                # own hitting plane (ball-centre x at impact)
     coop: CoopShot
     h: float
+    rng: np.random.Generator
     state: str = "WAIT"
     plan: SwingPlan | None = None
     shots: list[Shot] = field(default_factory=list)
@@ -71,7 +72,7 @@ class RallyPlayer:
         self.mpc = SwingMPC(self.m, self.ids, self.cfg, self.q_ready)
         q, z = self.q_ready, np.zeros_like(self.q_ready)
         self.traj = JointTrajectory([Quintic.fit(0.0, 1.0, q, z, z, q, z, z)])
-        self.t_hit, self.next_solve = np.inf, -np.inf
+        self.t_hit, self.next_solve, self.y_target = np.inf, -np.inf, 0.0
 
     def desired(self, t: float):
         return self.plan(t) if self.state == "SWING" else self.traj(t)
@@ -95,7 +96,8 @@ class RallyPlayer:
         replan = self.state == "SWING"
         if not replan:
             self.coop.new_stroke()
-        cp = self.coop.plan(pred.pos, pred.vel, replan=replan)
+            self.y_target = self.rng.uniform(*self.cfg["coop"].get("target_y_range", [0.0, 0.0]))
+        cp = self.coop.plan(pred.pos, pred.vel, y_c=self.y_target, replan=replan)
         if cp is None:
             return
         c_star = pred.pos - self.h * cp.n
@@ -155,9 +157,11 @@ def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, vie
     pred = BallPredictor(params, jc["predictor_dt"], rc["predictor_horizon"])
     players = {
         "A": RallyPlayer("A", +1.0, m, ids_a, q_ready, cfg, params, pred, table, x_plane_a,
-                         CoopShot(cfg, params, pred, table, +1.0, x_plane_b, z_cross), h),
+                         CoopShot(cfg, params, pred, table, +1.0, x_plane_b, z_cross), h,
+                         np.random.default_rng([seed, 2])),
         "B": RallyPlayer("B", -1.0, m, ids_b, q_ready, cfg, params, pred, table, x_plane_b,
-                         CoopShot(cfg, params, pred, table, -1.0, x_plane_a, z_cross), h),
+                         CoopShot(cfg, params, pred, table, -1.0, x_plane_a, z_cross), h,
+                         np.random.default_rng([seed, 3])),
     }
     serve = Launcher(cfg, pred, table, x_plane_a).sample(np.random.default_rng(seed))
     aero.set_ball_state(m, d, serve.pos, serve.vel)

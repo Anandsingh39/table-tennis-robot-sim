@@ -1,0 +1,28 @@
+# Extra credit E2 + rail: both robots on a sideways linear rail along their end lines, balls aimed
+# anywhere across the table. Deep-merged on top of rally2.yaml (so all E2 settings apply).
+extends: rally2.yaml
+
+robot:
+  rail:
+    # Model modification: OpenArm has no rail. Like the linear axes of the DeepMind / Sony table tennis
+    # robots, each arm's stand sits on a carriage driven along the end line (tt/model.py _mount_arm).
+    enabled: true
+    half_travel: 0.70             # m [assumed] carriage travel ±0.70 m (table half width 0.7625 m)
+    carriage_mass: 5.0            # kg [assumed] carriage + stand
+    max_force: 200.0              # N [assumed] belt-driven linear axis peak force
+    damping: 5.0                  # N·s/m [assumed] viscous rail friction
+  # rail first, then joints 1-7 (the rail is controlled like a 0th arm joint)
+  joint_speed_rated: [2.0, 10.47, 10.47, 3.77, 3.77, 12.57, 12.57, 12.57]   # m/s [assumed] for the rail; rad/s [OpenArm docs] for the arm
+  joint_speed_max: [3.0, 16.76, 16.76, 5.45, 5.45, 20.94, 20.94, 20.94]     # m/s [assumed]; rad/s [OpenArm docs]
+
+ready_pose:
+  q_nominal: [0.0, 0.0, 0.5, 0.0, 1.5708, 0.0, 0.0, 0.0]   # rail centred (m), then the arm posture prior (rad)
+
+rally:
+  plan_horizon: 1.30              # s [assumed] start planning (and sliding) as soon as the ball leaves the opponent
+
+launcher:
+  cross_y_range: [-0.50, 0.50]    # m [assumed] serves anywhere across the middle of the table width
+
+coop:
+  target_y_range: [-0.50, 0.50]   # m [assumed] each shot is aimed at a random lateral point of the partner's hitting plane
