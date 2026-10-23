@@ -1,0 +1,38 @@
+# Add-on: flat drives along the table. Deep-merged on top of rally_rail.yaml (two robots, rails, no spin).
+# Model modification: paddle pre-tilted 80 deg (face nearly vertical, like a racket held with the forearm
+# forward) instead of 40 deg; quick check (results in the chat log / docs): flat-drive paddle tilts 70-90 deg are
+# reachable with 75-85 deg mounts (24-37 hit points) but not with the 40 deg mount (0-9 points).
+extends: rally_rail.yaml
+
+paddle:
+  flange_quat: [0.08715574, 0.0, 0.99619470, 0.0]   # Ry(90 + 80 deg) = (cos 85°, 0, sin 85°, 0)
+
+workspace_scan:
+  nominal_tilt_deg: 80.0          # deg paddle normal tilted 80 deg toward the opponent
+  max_tilt_deg: 15.0              # deg
+  x_range: [0.15, 0.60]
+  z_range: [0.85, 1.45]
+
+ready_pose:
+  paddle_normal: [0.98480775, 0.0, 0.17364818]      # 80 deg toward +x
+
+hit:
+  # steady flat-rally analysis (bounce once per side, arrive at the partner's zone): at (0.35, 0, 1.05) the flat family
+  # needs paddle tilt 77-83 deg (nominal 80), normal speed 1.7-1.9 m/s, flight 0.68-0.74 s; the lob family needs 12-19 deg (unreachable).
+  center: [0.35, 0.0, 1.05]
+
+coop:
+  bounce_dists: [0.6, 0.7, 0.8, 0.9, 1.0]   # m past the net (flat family bounces 0.6-1.0 m past the net)
+  flight_time_range: [0.45, 1.05]           # s selects the flat family (lobs take 1.8-2.9 s)
+  grid_vx: [2.0, 12.0, 0.5]                 # m/s faster balls than the lob rally
+  grid_vz: [-3.0, 6.0, 0.5]
+
+launcher:
+  bounce_x_range: [1.00, 1.40]              # m flat serve: bounce 0.6-1.0 m before the net on A's half
+  cross_z_range: [1.00, 1.10]               # m around A's crossing height (hit z + h n_z ~ 1.054)
+  grid_vx: [-12.0, -2.0, 0.5]
+  grid_vz: [-3.0, 6.0, 0.5]
+
+strategy:
+  coop_z: 1.054                             # crossing height at the partner's plane for this mount / hit zone
+  coop_d: 0.8

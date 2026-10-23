@@ -28,3 +28,6 @@ MUJOCO_LOG.TXT
 !results/e2_spin_v1_*
 !results/e2_spin_v2_*
 !results/related_work.md
+!results/flat_rally_preview.mp4
+!results/flat_workspace.png
+!results/flat_frames.png
