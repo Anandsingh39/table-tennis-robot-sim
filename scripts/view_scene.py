@@ -24,20 +24,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tt.config import RESULTS, load_config  # noqa: E402
 from tt.control import gravity_comp_pd  # noqa: E402
-from tt.kinematics import paddle_pose, ready_pose  # noqa: E402
+from tt.kinematics import paddle_pose  # noqa: E402
 from tt.log_utils import Logger  # noqa: E402
-from tt.model import build_model  # noqa: E402
 from tt.render import simulate, snapshot  # noqa: E402
+from tt.sim import make_sim  # noqa: E402
 
 
 def setup(cfg: dict):
-    m, ids = build_model(cfg)
-    d = mujoco.MjData(m)
-    q_ready, p_ready, n_ready = ready_pose(m, ids, cfg)
-    d.qpos[ids.arm_qpos] = q_ready
-    d.qpos[ids.ball_qpos:ids.ball_qpos + 3] = p_ready + [0, 0, cfg["ball"]["init_offset_above_paddle"]]
+    sim = make_sim(cfg)
+    m, d, ids = sim.m, sim.d, sim.ids
+    d.qpos[ids.ball_qpos:ids.ball_qpos + 3] = sim.p_ready + [0, 0, cfg["ball"]["init_offset_above_paddle"]]
     mujoco.mj_forward(m, d)
-    return m, d, ids, q_ready
+    return m, d, ids, sim.q_ready
 
 
 def run_hold(cfg: dict, duration: float, video=None, viewer=False, drop_ball=False):

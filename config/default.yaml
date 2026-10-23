@@ -45,8 +45,16 @@ ball:
   hollow_shell: true
   init_offset_above_paddle: 0.6   # m  [plan Phase 5] drop height 0.5–0.8 m above the paddle
 
+aero:
+  # M2: F = -1/2 rho C_d A |v| v  +  1/2 rho C_m A r (w x v), gravity applied by MuJoCo; still air.
+  # Applied each step through data.xfrc_applied (force at the ball's center of mass).
+  air_density: 1.2                # kg/m^3 [std] sea level, ~20 °C
+  drag_coefficient: 0.47          # [std] smooth sphere, subcritical Re (~1e4 here); inside the plan's 0.4–0.5 literature range — tunable
+  magnus_coefficient: 0.0         # [plan] 0 = spin off for core juggling; set a literature value if spin is enabled
+  # Spin decay (aerodynamic torque) is neglected: torque-free sphere -> world-frame spin is constant.  [assumed]
+
 table:
-  length: 2.74                    # m  [ITTF]
+  length: 2.74                   # m  [ITTF]
   width: 1.525                    # m  [ITTF]
   top_height: 0.76                # m  [ITTF]
   thickness: 0.03                 # m  [assumed] visual
@@ -75,6 +83,16 @@ checks:
   hold_max_drift: 0.001           # m  [plan Phase 1] paddle drift < 1 mm
   ready_pose_pos_tol: 0.001       # m  [assumed] IK must reach the ready paddle position to within 1 mm
   ready_pose_normal_tol_deg: 0.5  # deg [assumed] and the paddle normal to within 0.5 deg
+  ballistic_duration: 1.0         # s  [plan Phase 2]
+  ballistic_max_error: 0.001      # m  [plan Phase 2] MuJoCo vs independent RK4, < 1 mm over 1 s
+  # Phase 2 initial conditions: (pos [m], lin vel [m/s], spin [rad/s, world]); chosen to stay above the floor for 1 s.
+  ballistic_cases:
+    - {name: vertical toss, pos: [0.41, 0.0, 1.2], vel: [0.0, 0.0, 4.5], spin: [0.0, 0.0, 0.0]}
+    - {name: forward lob,   pos: [0.0, 0.0, 1.2],  vel: [3.0, 1.0, 4.5], spin: [0.0, 0.0, 0.0]}
+    - {name: sidespin lob,  pos: [0.0, 0.0, 1.2],  vel: [2.0, 0.0, 4.5], spin: [0.0, 30.0, 120.0]}
+  # Magnus coefficient used ONLY to exercise the Magnus term + spin-frame handling in the validation
+  # (core config has spin off).  [assumed] order-of-magnitude test value, not a literature fit.
+  ballistic_test_magnus_coefficient: 0.6
 
 render:
   width: 960                      # px
