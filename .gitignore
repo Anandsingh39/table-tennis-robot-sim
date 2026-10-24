@@ -31,3 +31,7 @@ MUJOCO_LOG.TXT
 !results/flat_rally_preview.mp4
 !results/flat_workspace.png
 !results/flat_frames.png
+!results/rl_summary.md
+!results/rl_training.png
+!results/rl_point.mp4
+!results/rl/
