@@ -35,3 +35,6 @@ MUJOCO_LOG.TXT
 !results/rl_training.png
 !results/rl_point.mp4
 !results/rl/
+!results/e2_flat_summary.md
+!results/e2_flat_rally.png
+!results/e2_flat_rally.mp4
