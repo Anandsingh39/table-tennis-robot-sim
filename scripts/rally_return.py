@@ -28,6 +28,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tt.config import RALLY_CONFIG, RESULTS, load_config  # noqa: E402
+from tt.mpc import solve_stat_rows  # noqa: E402
 
 
 def episode(args):
@@ -38,10 +39,12 @@ def episode(args):
     t0 = time.time()
     r = run_return(cfg, seed)
     L = r.logs
-    ok = [s for s in r.strikes if s.success]
+    ok = [s for s in r.strikes if s.adopted]          # plans that were executed (exact, or best effort)
     out = dict(seed=seed, outcome=r.outcome, wall=time.time() - t0,
                landing=np.full(2, np.nan) if r.landing is None else r.landing, target=r.target, z_net=r.z_at_net,
-               n_solves=len(r.strikes), n_ok=len(ok), solve_times=np.array([s.solve_time for s in r.strikes]),
+               n_solves=len(r.strikes), n_ok=sum(s.success for s in r.strikes),
+               solve_log=[(s.success, s.best_effort, s.adopted, s.status, s.impact_err) for s in r.strikes],
+               solve_times=np.array([s.solve_time for s in r.strikes]),
                peak_tau=np.abs(L["tau"]).max(axis=0) / r.tau_max, saturated=bool(L["sat"].any()),
                min_margin=float(np.min(np.minimum(L["q"] - r.q_lo, r.q_hi - L["q"]))),
                max_qd=np.abs(L["qd"]).max(axis=0), launch_speed=float(np.linalg.norm(r.launch.vel)))
@@ -116,6 +119,7 @@ def main() -> None:
         ("ball height over the net, median [m]", f"{np.nanmedian([r['z_net'] for r in runs]):.2f}"),
         ("incoming ball launch speed, median [m/s]", f"{np.median([r['launch_speed'] for r in runs]):.2f}"),
         ("MPC solves per ball (mean)", f"{np.mean([r['n_solves'] for r in runs]):.1f} ({sum(r['n_solves'] - r['n_ok'] for r in runs)} failed in total)"),
+        *solve_stat_rows([x for r in runs for x in r["solve_log"]]),
         ("MPC solve time: median / p95 / max [ms]", f"{1e3 * np.median(st):.0f} / {1e3 * np.percentile(st, 95):.0f} / {1e3 * st.max():.0f}"),
         ("peak torque, worst ball [% of limit] per joint", str(np.round(100 * np.max([r["peak_tau"] for r in runs], axis=0)).astype(int))),
         ("balls with torque saturation", str(sum(r["saturated"] for r in runs))),

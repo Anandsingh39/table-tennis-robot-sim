@@ -33,6 +33,8 @@ launcher:
 
 mpc:
   full_velocity: true                      # constrain the full paddle velocity at impact (brushing component makes the spin)
+  w_vel: 0.0                               # the published spin results (v1/v2) used the earlier MPC: no velocity cost ...
+  best_effort: false                       # ... and no best-effort fallback
 
 ball:
   material: ball_marked                    # checker texture so the rotation is visible in the video

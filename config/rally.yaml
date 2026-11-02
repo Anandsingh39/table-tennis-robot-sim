@@ -52,6 +52,23 @@ mpc:
   w_end: 1.0                      # [assumed] weight on ending the follow-through near the ready pose (rad^-2 vs (rad/s^2)^2 s)
   max_iter: 300                   # [assumed] IPOPT
   tol: 1.0e-6                     # [assumed] IPOPT
+  # Cost  Σ h (w_acc |a|² + w_vel |q̇|²): the two terms of Nguyen et al. [4] eq. 3a (their weights are not published).
+  w_acc: 1.0                      # [4] acceleration weight (reference scale)
+  w_vel: 5.0                      # [tuned offline, 2026-11] 300 recorded swings: w_vel 0/1/5/20 -> mean |q̇| -0/-1/-5/-15% (flat rally), peak |a|/a_max on rail swings 0.85/0.86/0.90/1.00; 5 = moderate. 0 reproduces the earlier results
+  # Impact conditions: "equality" (exact) or "tolerance" (‖p-c*‖² <= tol_pos², ‖n-n*‖² <= chord(tol_normal)², (v-v*)² <= tol_vel², [4] eq. 3g-3i).
+  # Tolerance tested on 300 recorded swings: no better convergence (92-100% vs 100%), 2-3x slower solves, and the optimum
+  # sits on the tolerance boundary (speed error = tol_vel in every solve, position/normal in most): a systematic error
+  # -> equality kept; tolerance stays available.
+  impact_constraints: equality
+  tol_pos: 1.0e-3                 # m   [assumed] used only with impact_constraints: tolerance
+  tol_normal_deg: 0.05            # deg [assumed] ditto
+  tol_vel: 2.0e-3                 # m/s [assumed] ditto
+  # Best effort (our addition): if the impact problem is infeasible (ball out of reach), solve again with the impact
+  # conditions as L1 penalties and swing to the closest reachable paddle state instead of standing still.
+  best_effort: true
+  soft_w_pos: 10000.0              # per m   [measured] > 12x the largest impact multiplier on recorded swings (|λ_pos| <= 801) -> exact when feasible
+  soft_w_normal: 10000.0           # per sin(angle) [measured] |λ_normal| <= 411
+  soft_w_vel: 10000.0              # per m/s [measured] |λ_vel| <= 272
 
 launcher:
   # E1 stand-in opponent (tt/launcher.py); all ranges sampled uniformly with the run seed
@@ -68,6 +85,7 @@ launcher:
   starts: 5                       # [assumed] local solves tried per sample
   diff_step: 1.0e-4               # [assumed] relative finite-difference step for least_squares
   max_flight: 3.0                 # s
+  max_speed: 15.0                 # m/s [measured, 2026-11] reject diverged launch solves: legitimate launches over 240 scanned seeds are <= 9.9 m/s; E1 seed 61 had diverged to 1410 m/s
   tol: 1.0e-3                     # m [assumed] launch solve accuracy
   max_tries: 20
 

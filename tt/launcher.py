@@ -89,6 +89,8 @@ class Launcher:
             z_c = rng.uniform(*lc["cross_z_range"])
             for v0 in self._initial_guesses(pos, x_b, y_c, z_c)[:lc["starts"]]:
                 sol = least_squares(self._residual, v0, args=(pos, x_b, y_c, z_c), diff_step=lc["diff_step"])
-                if np.linalg.norm(sol.fun) < lc["tol"]:
+                # the solve is unbounded: a diverged start can "converge" at absurd speeds, where a ball moves metres
+                # per predictor step and the event detection is meaningless -> reject and try the next start
+                if np.linalg.norm(sol.fun) < lc["tol"] and np.linalg.norm(sol.x) <= lc["max_speed"]:
                     return Launch(pos, sol.x, x_b, np.array([y_c, z_c]))
         raise RuntimeError("launcher: no feasible launch found")

@@ -98,4 +98,5 @@ def play_point(cfg: dict, seed: int, pol_a, pol_b, max_hits: int) -> dict:
         winner = None
     return dict(seed=seed, winner=winner, fault=r.fault, by=r.fault_by, hits=len(r.hits),
                 fallbacks={k: v for k, v in (r.fallbacks or {}).items()},
+                solve_logs={k: v for k, v in (r.solve_logs or {}).items()},
                 decisions={k: [(o.tolist(), a.tolist()) for o, a in v] for k, v in (r.decisions or {}).items()})

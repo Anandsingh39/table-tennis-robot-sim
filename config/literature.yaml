@@ -30,8 +30,8 @@ ji2024:
 nguyen2025:
   cite: "D. Nguyen, K. D. Cancio, S. Kim, 'High Speed Robotic Table Tennis Swinging Using Lightweight Hardware with Model Predictive Control', arXiv:2505.01617 (ICRA 2025)"
   robot: "custom lightweight 5-DOF arm (6th DOF optional), OptiTrack 120 Hz ball tracking (Sec. II-III)"
-  method: "ball prediction with drag + table-rebound coefficients; joint-space OCP min sum(w_a qdd^2 + w_v qd^2) s.t. joint limits and terminal paddle position/velocity/orientation (eq. 3); CasADi + IPOPT; fixed-horizon MPC re-solved during the swing (Sec. IV)"
-  solve_time: "warm-started FHMPC median ~2.8-3.2 ms, 99.5% convergence (Table I, Intel i9-14900K)"
+  method: "ball prediction with drag + table-rebound coefficients; joint-space OCP min sum_n (w_a qdd^2 + w_v qd^2) (eq. 3a; weights not given) s.t. Euler double integrator, joint limits and terminal TOLERANCE constraints ||FK(q_f)-p_des||^2 <= eps_p, ||J q_f_dot - v_des||^2 <= eps_v, orientation ||.||^2 <= eps_o (eq. 3g-3i; eps not given); CasADi + IPOPT; two variants: shrinking-horizon SHMPC (current state, dt shrinks) and fixed-horizon FHMPC (ready state, constant dt, indexed by eq. 4) - FHMPC chosen (Sec. IV)"
+  solve_time: "Table I (warm start, i9-14900K): FHMPC 99.6% / 2.8 ms (fixed prediction), 99.5% / 3.2 ms (data); SHMPC 89.6% / 6.2 ms, 91.2% / 6.7 ms; without warm start ~65% and 23.7-25.2 ms"
   results: "hit rate 88.4% loop (topspin), 89.2% chop (backspin), 87.5% drive over 150 balls each; average exit velocity 11 m/s; paddle position error well within the 7.5 cm critical distance; speed within 2 m/s; orientation phi within 10 deg, theta up to 20 deg (Sec. V)"
   limitation_noted: "lacks wrist authority for some paddle angles; strike plane fixed (Sec. VI)"
 

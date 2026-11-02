@@ -20,3 +20,7 @@ selfplay:
   max_hits: 10                    # [assumed] point cap (draw if reached)
   workers: 22
   eval_points: 60                 # [assumed] points per head-to-head evaluation match
+
+mpc:
+  w_vel: 0.0                      # the published self-play results (results/rl_summary.md) used the earlier MPC: no velocity cost ...
+  best_effort: false              # ... and no best-effort fallback (the receiver stands still when its MPC is infeasible)

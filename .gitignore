@@ -40,3 +40,5 @@ MUJOCO_LOG.TXT
 !results/e2_flat_rally.mp4
 !results/showreel_project.mp4
 !results/showreel_flat.mp4
+!results/rl_best_effort_summary.md
+!results/mpc_formulation.md

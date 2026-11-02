@@ -47,6 +47,15 @@ class StrikeRecord:
     net_clearance: float
     solve_time: float
     success: bool
+    best_effort: bool = False         # the soft fallback converged (success False)
+    adopted: bool = False             # this plan became the executed swing
+    status: str = ""
+    impact_err: tuple = ()            # planned (|p - c*| [m], normal [deg], velocity [m/s]) at the impact node
+
+
+def adopt_plan(plan, current) -> bool:
+    """Execute a converged plan; a best-effort plan only when no exact plan is already being executed."""
+    return plan.success or (plan.best_effort and not (current is not None and current.success))
 
 
 def nominal_geometry(cfg: dict, params: AeroParams):
@@ -111,11 +120,13 @@ class Striker:
         q0, qd0, _ = self.desired(t)
         t_hit = t + pred.t_rel
         plan = self.mpc.solve(t, q0, qd0, t_hit, c_star, sp.n, sp.speed)
+        adopt = adopt_plan(plan, self.plan if self.state == "SWING" else None)
         self.solve_times.append(plan.solve_time)
         self.strikes.append(StrikeRecord(t, t_hit, pred.pos, pred.vel, sp.v_out, sp.n, sp.speed, c_star, sp.T,
-                                         sp.net_clearance, plan.solve_time, plan.success))
+                                         sp.net_clearance, plan.solve_time, plan.success, plan.best_effort, adopt,
+                                         plan.status, plan.impact_err))
         self.next_solve = t + mc["period"]
-        if plan.success:
+        if adopt:
             self.plan, self.t_hit, self.T, self.v_out, self.state = plan, plan.t_hit, sp.T, sp.v_out, "SWING"
 
 

@@ -29,7 +29,7 @@ from tt.model import SceneIds, scene_ids
 from tt.mpc import SwingMPC, SwingPlan
 from tt.planner import JointTrajectory, Quintic
 from tt.predictor import BallPredictor
-from tt.rally import nominal_geometry
+from tt.rally import adopt_plan, nominal_geometry
 from tt.render import simulate
 from tt.shot import CoopShot
 from tt.sim import make_sim
@@ -71,6 +71,7 @@ class RallyPlayer:
     plan: SwingPlan | None = None
     shots: list[Shot] = field(default_factory=list)
     solve_times: list[float] = field(default_factory=list)
+    solve_log: list[tuple] = field(default_factory=list)     # (success, best_effort, adopted, status, impact_err) per solve
 
     def __post_init__(self):
         self.mpc = SwingMPC(self.m, self.ids, self.cfg, self.q_ready)
@@ -145,9 +146,11 @@ class RallyPlayer:
         c_star = pred.pos - self.h * cp.n
         q0, qd0, _ = self.desired(t)
         plan = self.mpc.solve(t, q0, qd0, t + pred.t_rel, c_star, cp.n, cp.speed, cp.v_paddle)
+        adopt = adopt_plan(plan, self.plan if self.state == "SWING" else None)
         self.solve_times.append(plan.solve_time)
+        self.solve_log.append((plan.success, plan.best_effort, adopt, plan.status, plan.impact_err))
         self.next_solve = t + mc["period"]
-        if plan.success:
+        if adopt:
             self.plan, self.t_hit, self.state = plan, plan.t_hit, "SWING"
             rec = Shot(self.name, t, plan.t_hit, c_star, cp.n, cp.speed, cp.v_out, cp.bounce_dist, cp.tilt_deg,
                        cp.spin_cmd, cp.spin, cp.v_paddle)
@@ -173,6 +176,7 @@ class RallyRun:
     decisions: dict | None = None
     fallbacks: dict | None = None
     spin_downgrades: dict | None = None
+    solve_logs: dict | None = None    # player -> [(success, best_effort, adopted, status, impact_err)] per MPC solve
 
 
 def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, viewer=False, slowmo=1.0,
@@ -289,4 +293,5 @@ def run_rally(cfg: dict, seed: int, max_hits: int | None = None, video=None, vie
                     {k: p.solve_times for k, p in players.items()}, st["fault"] or "time limit", st["by"], seed,
                     ids_a.tau_max.copy(), ids_a.q_lo.copy(), ids_a.q_hi.copy(),
                     {k: p.decisions for k, p in players.items()}, {k: p.fallbacks for k, p in players.items()},
-                    {k: p.spin_downgrades for k, p in players.items()})
+                    {k: p.spin_downgrades for k, p in players.items()},
+                    {k: p.solve_log for k, p in players.items()})

@@ -30,6 +30,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tt.config import REPO, RESULTS, load_config  # noqa: E402
+from tt.mpc import solve_stat_rows  # noqa: E402
 
 CFG = REPO / "config" / "selfplay.yaml"
 OUT = RESULTS / "rl"
@@ -115,19 +116,21 @@ def train(ex, cfg, cfg_path):
     return mu, hist
 
 
-def evaluate(ex, cfg, cfg_path, theta, video=None):
+def evaluate(ex, cfg, cfg_path, theta, video=None, tag="rl"):
     from tt.strategy import cooperative_theta
 
     sp = cfg["selfplay"]
     n, cap = sp["eval_points"], sp["max_hits"]
     coop, rand, rl = ("cooperative", None), ("random", None), ("linear", theta)
-    rows = []
+    rows, mpc_rows = [], []
     for name, x, y in (("cooperative vs cooperative (baseline)", coop, coop),
                        ("RL strategy vs cooperative", rl, coop),
                        ("RL strategy vs random", rl, rand),
                        ("random vs cooperative", rand, coop)):
-        w, l, dr, hits, _ = match(ex, cfg_path, x, y, n, 9_000_000, cap)
+        w, l, dr, hits, res = match(ex, cfg_path, x, y, n, 9_000_000, cap)
         rows.append((name, w, l, dr, np.mean(hits)))
+        solves = [e for r in res for log in r.get("solve_logs", {}).values() for e in log]
+        mpc_rows.append((name, solve_stat_rows(solves)))
         print(f"{name}: X won {w}, lost {l}, draws (cap {cap} hits) {dr}; mean hits/point {np.mean(hits):.1f}", flush=True)
     from tt.strategy import make_policy
 
@@ -136,7 +139,7 @@ def evaluate(ex, cfg, cfg_path, theta, video=None):
 
     lo, hi = action_bounds(cfg)
     md = ["# RL add-on: self-play shot strategy (CEM / evolution strategies) on top of the MPC rally", "",
-          f"Config: config/selfplay.yaml (E2 + rail, no spin). {n} points per match, sides alternate, point cap {cap} hits "
+          f"Config: {Path(cfg_path).resolve().relative_to(REPO)} (E2 + rail, no spin). {n} points per match, sides alternate, point cap {cap} hits "
           "(draw). The MPC executes every shot; only the shot choice differs.", "",
           "| match (X vs Y) | X wins | X losses | draws | win rate of decided points | mean hits/point |", "|---|---|---|---|---|---|"]
     for name, w, l, dr, h in rows:
@@ -144,7 +147,9 @@ def evaluate(ex, cfg, cfg_path, theta, video=None):
     md += ["", f"Learned action at a neutral observation (ball centred, rails centred): y_c, z_c, d_b = "
            f"{np.round(pol(np.zeros(len(theta) // 3 - 1)), 3).tolist()} (cooperative: [0, {cfg['strategy']['coop_z']}, "
            f"{cfg['strategy']['coop_d']}]; ranges {lo.tolist()} .. {hi.tolist()})"]
-    (RESULTS / "rl_summary.md").write_text("\n".join(md) + "\n")
+    md += ["", "MPC solves per match (both robots):", ""] + [
+        f"- {name}: " + "; ".join(f"{k}: {v}" for k, v in mr) for name, mr in mpc_rows]
+    (RESULTS / f"{tag}_summary.md").write_text("\n".join(md) + "\n")
     print("\n".join(md))
     if video:
         from tt.rally2 import run_rally
@@ -181,6 +186,7 @@ def main() -> None:
     ap.add_argument("--config", type=Path, default=CFG)
     ap.add_argument("--eval-only", action="store_true")
     ap.add_argument("--video", type=Path, default=None)
+    ap.add_argument("--tag", default="rl", help="evaluation summary results/<tag>_summary.md")
     args = ap.parse_args()
     cfg = load_config(args.config)
     OUT.mkdir(parents=True, exist_ok=True)
@@ -190,7 +196,7 @@ def main() -> None:
         else:
             theta, hist = train(ex, cfg, args.config)
             plot(hist, RESULTS / "rl_training.png")
-        evaluate(ex, cfg, args.config, theta, args.video)
+        evaluate(ex, cfg, args.config, theta, args.video, args.tag)
 
 
 if __name__ == "__main__":

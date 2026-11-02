@@ -26,6 +26,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tt.config import REPO, RESULTS, load_config  # noqa: E402
+from tt.mpc import solve_stat_rows  # noqa: E402
 
 RALLY2_CONFIG = REPO / "config" / "rally2.yaml"
 
@@ -50,6 +51,7 @@ def rally(args):
     return dict(seed=seed, hits=len(r.hits), fault=r.fault, by=r.fault_by, wall=time.time() - t0,
                 spin_pairs=spin_pairs, downgrades=sum((r.spin_downgrades or {}).values()),
                 hit_y=[e.pos[1] for _, e in r.hits],
+                solve_log=[x for k in sorted(r.solve_logs or {}) for x in r.solve_logs[k]],
                 rail_range=[float(L[f"q_{k}"][:, 0].min()) for k in "AB"] + [float(L[f"q_{k}"][:, 0].max()) for k in "AB"]
                 if cfg["robot"].get("rail", {}).get("enabled", False) else None,
                 sim_time=float(L["t"][-1]),
@@ -108,6 +110,7 @@ def main() -> None:
              f"{min(min(r['rail_range'][:2]) for r in runs):.2f} / {max(max(r['rail_range'][2:]) for r in runs):.2f}"),
             ("paddle normal vs nominal: median / max [deg]", f"{np.median(np.concatenate([r['tilts'] for r in runs])):.1f} / {np.max(np.concatenate([r['tilts'] for r in runs])):.1f}"),
             ("paddle normal speed: median [m/s]", f"{np.median(np.concatenate([r['speeds'] for r in runs])):.2f}"),
+            *solve_stat_rows([x for r in runs for x in r["solve_log"]]),
             ("MPC solve time: median / p95 / max [ms]", f"{1e3 * np.median(st):.0f} / {1e3 * np.percentile(st, 95):.0f} / {1e3 * st.max():.0f}"),
             ("peak torque, worst rally [% of limit] per joint", str(np.round(100 * np.max([r["peak_tau"] for r in runs], axis=0)).astype(int))),
             ("rallies with torque saturation", str(sum(r["saturated"] for r in runs))),
@@ -115,7 +118,7 @@ def main() -> None:
             ("simulated time / wall time per rally (mean) [s]", f"{np.mean([r['sim_time'] for r in runs]):.1f} / {np.mean([r['wall'] for r in runs]):.0f}"),
         ]
         md = [f"# {args.tag}: two-robot cooperative rally", "",
-              f"Config: {args.config.resolve().relative_to(REPO)} (two OpenArms, pre-tilted paddle mounts, cooperative lob shots, MPC swings, "
+              f"Config: {cfg_label(args.config)} (two OpenArms, pre-tilted paddle mounts, cooperative lob shots, MPC swings, "
               "true ball state). Serve: launcher ball to robot A. Legal hit = after exactly one bounce on the receiver's half.", "",
               "| metric | value |", "|---|---|"] + [f"| {a} | {b} |" for a, b in rows]
         (RESULTS / f"{args.tag}_summary.md").write_text("\n".join(md) + "\n")
@@ -126,6 +129,12 @@ def main() -> None:
 
         r = run_rally(cfg, args.video_seed, args.video_hits, video=args.video, slowmo=args.slowmo)
         print(f"video: {args.video} ({len(r.hits)} hits, ended by '{r.fault}')")
+
+
+def cfg_label(path: Path) -> str:
+    """Config path relative to the repo, or absolute for a config kept elsewhere (e.g. a comparison run)."""
+    p = path.resolve()
+    return str(p.relative_to(REPO)) if p.is_relative_to(REPO) else str(p)
 
 
 def spin_rows(runs):

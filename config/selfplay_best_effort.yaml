@@ -1,0 +1,7 @@
+# Self-play evaluation with the MPC best-effort fallback: the only change vs selfplay.yaml.
+# A receiver whose exact swing is infeasible (ball out of reach) swings to the closest reachable paddle state
+# instead of standing still. Same learned strategy (results/rl/theta.npy), same evaluation seeds.
+extends: selfplay.yaml
+
+mpc:
+  best_effort: true
