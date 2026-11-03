@@ -8,3 +8,6 @@ matplotlib
 imageio[ffmpeg]
 pytest
 casadi==3.8.1
+# GPU self-play (scripts/train_selfplay_ppo.py). CUDA build: pip install "torch==2.12.1+cu130" --index-url https://download.pytorch.org/whl/cu130
+# (cu130 runs on Ada and Blackwell GPUs; the CPU-only build also works for evaluation)
+torch==2.12.1

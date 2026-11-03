@@ -76,6 +76,25 @@ class RandomPolicy:
         return self.rng.uniform(self.lo, self.hi)
 
 
+@dataclass
+class ExplorePolicy:
+    """Data collection for the GPU game model: a base shot (None = uniform random) plus Gaussian noise of `noise` x the
+    action range, and a uniformly random rail recovery target as 4th action."""
+    base: object
+    noise: float
+    lo: np.ndarray
+    hi: np.ndarray
+    rec_range: tuple
+    rng: np.random.Generator
+
+    def __call__(self, obs: np.ndarray) -> np.ndarray:
+        if self.base is None:
+            a = self.rng.uniform(self.lo, self.hi)
+        else:
+            a = np.clip(self.base(obs) + self.noise * (self.hi - self.lo) * self.rng.standard_normal(3), self.lo, self.hi)
+        return np.append(a, self.rng.uniform(*self.rec_range))
+
+
 def make_policy(kind: str, cfg: dict, theta=None, seed: int = 0):
     lo, hi = action_bounds(cfg)
     if kind == "linear":
@@ -84,6 +103,14 @@ def make_policy(kind: str, cfg: dict, theta=None, seed: int = 0):
         return LinearPolicy(cooperative_theta(cfg), lo, hi)
     if kind == "random":
         return RandomPolicy(lo, hi, np.random.default_rng(seed))
+    if kind == "ppo":                     # theta = path of a trained policy (tt.ppo_policy), deterministic
+        from tt.ppo_policy import load_policy
+        return load_policy(theta, cfg, explore=False, seed=seed)
+    if kind.startswith("explore_"):
+        base = {"explore_random": None, "explore_coop": LinearPolicy(cooperative_theta(cfg), lo, hi),
+                "explore_cem": None if theta is None else LinearPolicy(np.asarray(theta, float), lo, hi)}[kind]
+        return ExplorePolicy(base, cfg["collect"]["noise"], lo, hi, tuple(cfg["strategy"]["recover_range"]),
+                             np.random.default_rng(seed))
     raise ValueError(kind)
 
 
@@ -99,4 +126,7 @@ def play_point(cfg: dict, seed: int, pol_a, pol_b, max_hits: int) -> dict:
     return dict(seed=seed, winner=winner, fault=r.fault, by=r.fault_by, hits=len(r.hits),
                 fallbacks={k: v for k, v in (r.fallbacks or {}).items()},
                 solve_logs={k: v for k, v in (r.solve_logs or {}).items()},
-                decisions={k: [(o.tolist(), a.tolist()) for o, a in v] for k, v in (r.decisions or {}).items()})
+                decisions={k: [dict(t=float(x["t"]), obs=x["obs"].tolist(), act=x["act"].tolist(),
+                                    fallback=bool(x["fallback"])) for x in v] for k, v in (r.decisions or {}).items()},
+                hit_log=[(who, float(ev.t)) for who, ev in r.hits],
+                rail_ready=float(r.logs["q_A"][0, 0]) if r.logs["q_A"].shape[1] > 7 else 0.0)

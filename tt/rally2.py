@@ -80,20 +80,29 @@ class RallyPlayer:
         self.t_hit, self.next_solve, self.y_target, self.spin_cmd = np.inf, -np.inf, 0.0, 0.0
         self.z_target, self.d_choice = None, None
         self.ctx = {"own_rail": 0.0, "opp_rail": 0.0}
-        self.decisions: list = []              # (obs, action) per stroke when a strategy is used
+        self.decisions: list = []              # dict(t, obs, act, fallback) per stroke when a strategy is used
         self.pending = None                    # this ball's decision (or "fallback"); cleared after the stroke
         self.fallbacks = 0                     # chosen shots that could not be made (cooperative shot used)
         self.spin_downgrades = 0               # spin shots played flat because the spin was out of reach
+        self.recover = None                    # strategy's rail recovery target (own joint coordinate); None = ready pose
 
     def desired(self, t: float):
         return self.plan(t) if self.state == "SWING" else self.traj(t)
+
+    def recovery_pose(self) -> np.ndarray:
+        """Pose to return to after a stroke: the ready pose, with the rail at the strategy's recovery target if any."""
+        q = self.q_ready.copy()
+        if self.recover is not None and self.cfg["robot"].get("rail", {}).get("enabled", False):
+            margin = self.cfg["mpc"]["joint_margin"]
+            q[0] = np.clip(self.recover, self.ids.q_lo[0] + margin, self.ids.q_hi[0] - margin)
+        return q
 
     def tick(self, t, pos, vel, spin, my_turn: bool, bounced: bool) -> None:
         rc, mc = self.cfg["rally"], self.cfg["mpc"]
         if self.state == "SWING" and t >= self.plan.t_end:
             self.pending = None                   # stroke finished: the next ball gets a new decision
             q_end, z = self.plan.q[-1], np.zeros_like(self.q_ready)
-            self.traj = JointTrajectory([Quintic.fit(t, rc["return_time"], q_end, z, z, self.q_ready, z, z)])
+            self.traj = JointTrajectory([Quintic.fit(t, rc["return_time"], q_end, z, z, self.recovery_pose(), z, z)])
             self.state = "RETURN"
         if self.state == "RETURN" and t >= self.traj.t_end:
             self.state = "WAIT"
@@ -115,9 +124,11 @@ class RallyPlayer:
                 if self.pending is None:          # the strategy decides ONCE per incoming ball
                     from tt.strategy import features
                     obs = features(pred, self.sign, self.cfg, self.ctx)
-                    y_h, z_c, d_b = self.strategy(obs)
+                    act = np.asarray(self.strategy(obs), float)
+                    y_h, z_c, d_b = act[:3]
+                    self.recover = float(act[3]) if len(act) > 3 else None
                     self.pending = (self.sign * y_h, z_c, d_b)
-                    self.decisions.append((obs, np.array([y_h, z_c, d_b])))
+                    self.decisions.append(dict(t=t, obs=obs, act=act, fallback=False))
                 if self.pending != "fallback":
                     self.y_target, self.z_target, self.d_choice = self.pending
             spins = cc.get("spin_choices", [0.0])
@@ -131,6 +142,7 @@ class RallyPlayer:
         if cp is None and not replan and self.strategy is not None and self.pending != "fallback":
             # the chosen shot cannot be made: fall back to the safe cooperative shot for this ball
             self.pending, self.fallbacks = "fallback", self.fallbacks + 1
+            self.decisions[-1]["fallback"] = True
             self.y_target, self.z_target, self.d_choice = 0.0, None, None
             self.coop.new_stroke()
             cp = self.coop.plan(pred.pos, pred.vel, y_c=0.0, w_in=w_in, spin_cmd=self.spin_cmd)
@@ -173,7 +185,7 @@ class RallyRun:
     tau_max: np.ndarray
     q_lo: np.ndarray
     q_hi: np.ndarray
-    decisions: dict | None = None
+    decisions: dict | None = None     # player -> [dict(t, obs, act, fallback)] strategy decisions, one per ball
     fallbacks: dict | None = None
     spin_downgrades: dict | None = None
     solve_logs: dict | None = None    # player -> [(success, best_effort, adopted, status, impact_err)] per MPC solve

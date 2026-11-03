@@ -1,0 +1,53 @@
+# Self-play v2: deep RL (PPO + league) on a GPU game model learned from the full MuJoCo + MPC rally,
+# then validated in the full rally. Pipeline: scripts/collect_transitions.py -> scripts/train_game_model.py
+# -> scripts/train_selfplay_ppo.py -> scripts/eval_selfplay_ppo.py.
+extends: selfplay.yaml
+
+mpc:
+  w_vel: 5.0                      # current MPC (selfplay.yaml pins the older settings for its published CEM results)
+  best_effort: true               # receivers swing to the closest reachable paddle state (no free points)
+
+selfplay:
+  max_hits: 30                    # [data, 2026-11] faults are rare (~3% of strokes): a 10-hit cap makes most points draws
+  eval_points: 60
+
+strategy:
+  recover_range: [-0.50, 0.50]    # m [assumed] rail recovery target after a stroke (own frame); rail travel ±0.70 minus margin
+
+collect:
+  max_hits: 12                    # [assumed] longer points than the 10-hit match cap: more transitions per serve
+  mix: {explore_random: 0.4, explore_coop: 0.3, explore_cem: 0.3}   # [assumed] policy kinds drawn per player per point
+  noise: 0.15                     # [assumed] action noise, fraction of each action range
+  workers: 20                     # of 24 cores (leaves room for GPU work)
+  shard_points: 40                # points per saved shard
+  seed0: 20000000
+
+model:                            # tt/game_model.py, scripts/train_game_model.py
+  members: 5                      # [assumed] ensemble size (a random member per simulated stroke)
+  hidden: 256
+  layers: 3
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  batch: 1024
+  max_epochs: 400
+  patience: 30                    # epochs without validation improvement
+  val_frac: 0.15                  # held-out points
+  w_next: 1.0                     # weight of the next-observation NLL vs the outcome cross-entropy
+
+ppo:                              # tt/selfplay_ppo.py, scripts/train_selfplay_ppo.py
+  envs: 8192                      # points played in parallel per iteration (GPU)
+  iterations: 2000
+  hidden: 256
+  lr: 3.0e-4
+  epochs: 4
+  minibatch: 8192
+  clip: 0.2
+  gae_lambda: 0.95
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 1.0
+  max_hits: 30                    # point cap (draw); = selfplay.max_hits below, so the model and the full rally match
+  snapshot_every: 50              # iterations between frozen copies added to the league
+  league: {self: 0.35, past: 0.35, cooperative: 0.10, random: 0.10, cem: 0.10}   # [assumed] opponent mix
+  eval_every: 50
+  eval_envs: 4096
